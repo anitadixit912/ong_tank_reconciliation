@@ -1,0 +1,14 @@
+apiVersion: solution.sap/v1
+kind: Solution
+
+metadata:
+  name: tank-reconciliation-29477
+  version: 1.0.0
+  description: >
+    End-to-end daily hydrocarbon tank stock reconciliation — ATG + Fiori ingestion,
+    VCF correction, variance analysis, HPM goods movement posting, and supervisor
+    approval — orchestrated by an n8n Reconciliation Agent with a CAP dashboard on SAP BTP.
+
+assets:
+  - ref: ./assets/tank-reconciliation-cap/asset.yaml
+  - ref: ./assets/n8n/asset.yaml

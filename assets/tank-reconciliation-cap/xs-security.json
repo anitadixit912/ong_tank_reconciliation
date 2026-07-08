@@ -1,0 +1,57 @@
+{
+  "xsappname": "tank-reconciliation-cap",
+  "tenant-mode": "dedicated",
+  "description": "Tank Stock Reconciliation — security descriptor",
+  "scopes": [
+    {
+      "name": "$XSAPPNAME.ReconciliationUser",
+      "description": "View reconciliation runs and tank results"
+    },
+    {
+      "name": "$XSAPPNAME.ReconciliationApprover",
+      "description": "Approve or reject urgent variance postings"
+    },
+    {
+      "name": "$XSAPPNAME.ReconciliationAdmin",
+      "description": "Full admin access including tank configuration"
+    }
+  ],
+  "role-templates": [
+    {
+      "name": "ReconciliationUser",
+      "description": "Read-only reconciliation viewer",
+      "scope-references": ["$XSAPPNAME.ReconciliationUser"]
+    },
+    {
+      "name": "ReconciliationApprover",
+      "description": "Supervisor who approves urgent variances",
+      "scope-references": [
+        "$XSAPPNAME.ReconciliationUser",
+        "$XSAPPNAME.ReconciliationApprover"
+      ]
+    },
+    {
+      "name": "ReconciliationAdmin",
+      "description": "Full admin",
+      "scope-references": [
+        "$XSAPPNAME.ReconciliationUser",
+        "$XSAPPNAME.ReconciliationApprover",
+        "$XSAPPNAME.ReconciliationAdmin"
+      ]
+    }
+  ],
+  "role-collections": [
+    {
+      "name": "TankRecon_User",
+      "role-template-references": ["$XSAPPNAME.ReconciliationUser"]
+    },
+    {
+      "name": "TankRecon_Approver",
+      "role-template-references": ["$XSAPPNAME.ReconciliationApprover"]
+    },
+    {
+      "name": "TankRecon_Admin",
+      "role-template-references": ["$XSAPPNAME.ReconciliationAdmin"]
+    }
+  ]
+}

@@ -1,0 +1,40 @@
+apiVersion: asset.sap/v1
+kind: Asset
+type: cap-app
+
+metadata:
+  name: tank-reconciliation-cap
+  version: 1.0.0
+
+target: cf
+
+test:
+  command: npm test
+  resultsPath: test-results.xml
+  resultsFormat: junit
+
+components:
+  - name: srv
+    buildPath: .
+    outputPath: gen/srv
+    target: cf
+    startCommand: node node_modules/@sap/cds/bin/serve.js all --production
+    provides:
+      endpoints:
+        - path: /reconciliation
+          port: 4004
+          protocol: http
+      protocols: [odata-v4, rest]
+    port: 4004
+    requires:
+      - name: hdi-container
+      - name: xsuaa
+  - name: hdi-deployer
+    type: hdi-deployer
+    buildPath: .
+    outputPath: gen/db
+    target: cf
+    requires:
+      - hdi-container
+    custom:
+      lifecycle: init

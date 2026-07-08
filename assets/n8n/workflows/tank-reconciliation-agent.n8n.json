@@ -1,0 +1,1841 @@
+{
+    "name": "Tank Reconciliation Agent",
+    "nodes": [
+        {
+            "parameters": {
+                "content": "ENVIRONMENT VARIABLES (configure in n8n Settings > Variables):\n\nCAP_BASE_URL   — CAP backend base URL\nS4_BASE_URL    — S/4HANA host\nATG_BASE_URL   — ATG system API base URL\nBTP_ANS_URL    — BTP Alert Notification Service endpoint\nBTP_ANS_TOKEN  — BTP ANS bearer token\nTEAMS_WEBHOOK_URL         — MS Teams Incoming Webhook URL\nREPORT_EMAIL_RECIPIENTS   — Comma-separated email list\nPDF_SERVICE_URL           — PDF generation service URL\n\nNO credentials blocks are embedded in this workflow."
+            },
+            "id": "notice-env-vars",
+            "name": "Env Vars",
+            "type": "n8n-nodes-base.stickyNote",
+            "typeVersion": 1,
+            "position": [
+                -200,
+                -240
+            ]
+        },
+        {
+            "parameters": {
+                "rule": {
+                    "interval": [
+                        {
+                            "field": "cronExpression",
+                            "expression": "0 6 * * *"
+                        }
+                    ]
+                }
+            },
+            "id": "scheduler-trigger",
+            "name": "Daily Scheduler 06:00",
+            "type": "n8n-nodes-base.scheduleTrigger",
+            "typeVersion": 1,
+            "position": [
+                -60,
+                0
+            ]
+        },
+        {
+            "parameters": {
+                "httpMethod": "POST",
+                "path": "tank-reconciliation/trigger",
+                "responseMode": "responseNode",
+                "options": {}
+            },
+            "id": "webhook-trigger",
+            "name": "Webhook Trigger",
+            "type": "n8n-nodes-base.webhook",
+            "typeVersion": 1,
+            "position": [
+                -60,
+                160
+            ]
+        },
+        {
+            "parameters": {
+                "mode": "mergeByIndex",
+                "options": {
+                    "includeUnpaired": true
+                }
+            },
+            "id": "merge-triggers",
+            "name": "Merge Triggers",
+            "type": "n8n-nodes-base.merge",
+            "typeVersion": 2,
+            "position": [
+                160,
+                80
+            ]
+        },
+        {
+            "parameters": {
+                "jsCode": "const input = $input.first()?.json || {};\nconst runDate = input.runDate || input.body?.runDate || new Date().toISOString().slice(0, 10);\nconst triggeredBy = input.triggeredBy || input.body?.triggeredBy || 'scheduler';\nreturn [{ json: { runDate, triggeredBy } }];"
+            },
+            "id": "normalize-trigger",
+            "name": "Normalize Trigger Input",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                360,
+                80
+            ]
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "={{ $vars.CAP_BASE_URL }}/reconciliation/triggerRun",
+                "sendHeaders": true,
+                "headerParameters": {
+                    "parameters": [
+                        {
+                            "name": "Content-Type",
+                            "value": "application/json"
+                        },
+                        {
+                            "name": "Accept",
+                            "value": "application/json"
+                        }
+                    ]
+                },
+                "sendBody": true,
+                "bodyParameters": {
+                    "parameters": [
+                        {
+                            "name": "runDate",
+                            "value": "={{ $json.runDate }}"
+                        },
+                        {
+                            "name": "triggeredBy",
+                            "value": "={{ $json.triggeredBy }}"
+                        }
+                    ]
+                },
+                "options": {}
+            },
+            "id": "initialize-run",
+            "name": "1. Initialize Run",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4,
+            "position": [
+                560,
+                80
+            ],
+            "onError": "continueErrorOutput"
+        },
+        {
+            "parameters": {
+                "jsCode": "const capResponse = $input.first()?.json || {};\nconst prev = $('Normalize Trigger Input').first()?.json || {};\nconst runId = capResponse.runId || capResponse.value?.runId;\nif (!runId) throw new Error('CAP did not return a runId: ' + JSON.stringify(capResponse));\nreturn [{ json: { runId, runDate: prev.runDate, triggeredBy: prev.triggeredBy } }];"
+            },
+            "id": "extract-run-id",
+            "name": "Extract runId",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                760,
+                80
+            ]
+        },
+        {
+            "parameters": {
+                "method": "GET",
+                "url": "={{ $vars.ATG_BASE_URL }}/api/readings",
+                "sendQuery": true,
+                "queryParameters": {
+                    "parameters": [
+                        {
+                            "name": "date",
+                            "value": "={{ $json.runDate }}"
+                        }
+                    ]
+                },
+                "options": {}
+            },
+            "id": "atg-ingest",
+            "name": "2. ATG Ingest",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4,
+            "position": [
+                960,
+                -80
+            ],
+            "onError": "continueErrorOutput"
+        },
+        {
+            "parameters": {
+                "method": "GET",
+                "url": "={{ $vars.S4_BASE_URL }}/sap/opu/odata/sap/API_PHYSICAL_INVENTORY_DOC_SRV/A_PhysInvtryDocItem",
+                "sendQuery": true,
+                "queryParameters": {
+                    "parameters": [
+                        {
+                            "name": "$filter",
+                            "value": "=PostingDate eq '{{ $('Extract runId').first().json.runDate }}'"
+                        },
+                        {
+                            "name": "$select",
+                            "value": "Material,Plant,StorageLocation,BookQuantityBeforeCount,CountedQuantity,UnitOfMeasure"
+                        },
+                        {
+                            "name": "$format",
+                            "value": "json"
+                        }
+                    ]
+                },
+                "options": {}
+            },
+            "id": "fiori-ingest",
+            "name": "3. Fiori Physical Inventory Ingest",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4,
+            "position": [
+                960,
+                80
+            ],
+            "onError": "continueErrorOutput"
+        },
+        {
+            "parameters": {
+                "method": "GET",
+                "url": "={{ $vars.S4_BASE_URL }}/sap/opu/odata/sap/API_MATERIAL_STOCK_SRV/A_MatlStkInAcctMod",
+                "sendQuery": true,
+                "queryParameters": {
+                    "parameters": [
+                        {
+                            "name": "$select",
+                            "value": "Material,Plant,StorageLocation,MatlStkInAcctMod_Stock"
+                        },
+                        {
+                            "name": "$filter",
+                            "value": "Plant eq 'TERM1'"
+                        },
+                        {
+                            "name": "$format",
+                            "value": "json"
+                        }
+                    ]
+                },
+                "options": {}
+            },
+            "id": "book-stock-ingest",
+            "name": "4. HPM Book Stock Read",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4,
+            "position": [
+                960,
+                240
+            ],
+            "onError": "continueErrorOutput"
+        },
+        {
+            "parameters": {
+                "method": "GET",
+                "url": "={{ $vars.CAP_BASE_URL }}/reconciliation/TankConfigurations",
+                "sendQuery": true,
+                "queryParameters": {
+                    "parameters": [
+                        {
+                            "name": "$filter",
+                            "value": "active eq true"
+                        },
+                        {
+                            "name": "$select",
+                            "value": "tankId,materialNumber,plant,storageLocation,flagThresholdPct,urgentThresholdPct,maximumCapacityLiters"
+                        }
+                    ]
+                },
+                "options": {}
+            },
+            "id": "fetch-tank-config",
+            "name": "2b. Fetch Tank Config",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4,
+            "position": [
+                960,
+                400
+            ]
+        },
+        {
+            "parameters": {
+                "jsCode": "const runMeta = $('Extract runId').first().json;\nconst runId = runMeta.runId;\nconst runDate = runMeta.runDate;\n\nconst atgRaw = $('2. ATG Ingest').first()?.json;\nconst atgFailed = !atgRaw || atgRaw.error;\nconst atgReadings = atgFailed ? [] : (Array.isArray(atgRaw) ? atgRaw : (atgRaw.value || []));\nconst atgByTank = {};\nfor (const r of atgReadings) { atgByTank[r.tankId] = r; }\n\nconst fioriRaw = $('3. Fiori Physical Inventory Ingest').first()?.json;\nconst fioriItems = fioriRaw?.d?.results || fioriRaw?.value || [];\nconst fioriByTank = {};\nfor (const item of fioriItems) {\n  const tId = item.StorageLocation;\n  fioriByTank[tId] = { tankId: tId, fioriVolume: parseFloat(item.CountedQuantity || 0), material: item.Material, plant: item.Plant, bookQtyBefore: parseFloat(item.BookQuantityBeforeCount || 0) };\n}\n\nconst stockRaw = $('4. HPM Book Stock Read').first()?.json;\nconst stockItems = stockRaw?.d?.results || stockRaw?.value || [];\nconst stockByTank = {};\nfor (const item of stockItems) {\n  const tId = item.StorageLocation;\n  stockByTank[tId] = { tankId: tId, material: item.Material, plant: item.Plant, bookStock: parseFloat(item.MatlStkInAcctMod_Stock || 0) };\n}\n\nconst cfgRaw = $('2b. Fetch Tank Config').first()?.json;\nconst cfgItems = cfgRaw?.value || cfgRaw?.d?.results || [];\nconst cfgByTank = {};\nfor (const cfg of cfgItems) { cfgByTank[cfg.tankId] = cfg; }\n\nconst configuredTanks = Object.keys(cfgByTank);\nconst mergedTanks = [];\nconst missingTankIds = [];\n\nfor (const tankId of configuredTanks) {\n  const cfg = cfgByTank[tankId];\n  const atg = atgByTank[tankId];\n  const fiori = fioriByTank[tankId];\n  const stock = stockByTank[tankId];\n  const grossVolume = atg?.grossVolume ?? fiori?.fioriVolume ?? null;\n  const temperature = atg?.temperature ?? 15;\n  const bookStock = stock?.bookStock ?? fiori?.bookQtyBefore ?? null;\n  const material = stock?.material || fiori?.material || cfg.materialNumber;\n  const plant = stock?.plant || fiori?.plant || cfg.plant;\n  if (grossVolume === null || bookStock === null) missingTankIds.push(tankId);\n  mergedTanks.push({ tankId, material, plant, storageLocation: tankId, grossVolume, temperature, bookStock, flagThresholdPct: cfg.flagThresholdPct, urgentThresholdPct: cfg.urgentThresholdPct, maximumCapacityLiters: cfg.maximumCapacityLiters, atgPresent: !!atg, fioriPresent: !!fiori, stockPresent: !!stock });\n}\n\nconst complete = missingTankIds.length === 0;\nconst m1Message = complete\n  ? `M1.achieved: data ingestion complete — ${mergedTanks.length} tanks loaded`\n  : `M1.missed: missing readings for tanks: ${missingTankIds.join(', ')}`;\n\nreturn [{ json: { runId, runDate, complete, tanks: mergedTanks, missingTankIds, m1Message, tankCount: mergedTanks.length } }];"
+            },
+            "id": "merge-validate",
+            "name": "5. Merge and Validate Data",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                1180,
+                160
+            ]
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "={{ $vars.CAP_BASE_URL }}/reconciliation/AuditLogEntries",
+                "sendHeaders": true,
+                "headerParameters": {
+                    "parameters": [
+                        {
+                            "name": "Content-Type",
+                            "value": "application/json"
+                        }
+                    ]
+                },
+                "sendBody": true,
+                "bodyParameters": {
+                    "parameters": [
+                        {
+                            "name": "run_ID",
+                            "value": "={{ $json.runId }}"
+                        },
+                        {
+                            "name": "step",
+                            "value": "INGEST"
+                        },
+                        {
+                            "name": "milestone",
+                            "value": "M1"
+                        },
+                        {
+                            "name": "outcome",
+                            "value": "={{ $json.complete ? 'ACHIEVED' : 'MISSED' }}"
+                        },
+                        {
+                            "name": "message",
+                            "value": "={{ $json.m1Message }}"
+                        },
+                        {
+                            "name": "timestamp",
+                            "value": "={{ new Date().toISOString() }}"
+                        },
+                        {
+                            "name": "actor",
+                            "value": "system"
+                        }
+                    ]
+                },
+                "options": {}
+            },
+            "id": "m1-log",
+            "name": "6. M1 Milestone Log",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4,
+            "position": [
+                1380,
+                160
+            ],
+            "onError": "continueRegularOutput"
+        },
+        {
+            "parameters": {
+                "conditions": {
+                    "boolean": [
+                        {
+                            "value1": "={{ $('5. Merge and Validate Data').first().json.complete }}",
+                            "value2": true
+                        }
+                    ]
+                }
+            },
+            "id": "completeness-check",
+            "name": "7. Completeness Check",
+            "type": "n8n-nodes-base.if",
+            "typeVersion": 1,
+            "position": [
+                1580,
+                160
+            ]
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "={{ $vars.BTP_ANS_URL }}/v1/notifications/recipients/custom",
+                "sendHeaders": true,
+                "headerParameters": {
+                    "parameters": [
+                        {
+                            "name": "Content-Type",
+                            "value": "application/json"
+                        },
+                        {
+                            "name": "Authorization",
+                            "value": "=Bearer {{ $vars.BTP_ANS_TOKEN }}"
+                        }
+                    ]
+                },
+                "sendBody": true,
+                "specifyBody": "json",
+                "jsonBody": "={\"eventType\":\"TankReconciliationIngestFailed\",\"severity\":\"FATAL\",\"subject\":\"Tank Reconciliation HALTED - Missing Data {{ $('5. Merge and Validate Data').first().json.runDate }}\",\"body\":\"Reconciliation run HALTED. Missing tank data: {{ $('5. Merge and Validate Data').first().json.missingTankIds.join(', ') }}\"}",
+                "options": {}
+            },
+            "id": "halt-urgent-alert",
+            "name": "7a. Halt URGENT Alert",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4,
+            "position": [
+                1780,
+                360
+            ],
+            "onError": "continueRegularOutput"
+        },
+        {
+            "parameters": {
+                "method": "PATCH",
+                "url": "={{ $vars.CAP_BASE_URL }}/reconciliation/ReconciliationRuns({{ $('5. Merge and Validate Data').first().json.runId }})",
+                "sendHeaders": true,
+                "headerParameters": {
+                    "parameters": [
+                        {
+                            "name": "Content-Type",
+                            "value": "application/json"
+                        }
+                    ]
+                },
+                "sendBody": true,
+                "bodyParameters": {
+                    "parameters": [
+                        {
+                            "name": "status",
+                            "value": "FAILED"
+                        }
+                    ]
+                },
+                "options": {}
+            },
+            "id": "halt-set-failed",
+            "name": "7b. Set Run FAILED",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4,
+            "position": [
+                1980,
+                360
+            ],
+            "onError": "continueRegularOutput"
+        },
+        {
+            "parameters": {
+                "method": "GET",
+                "url": "={{ $vars.S4_BASE_URL }}/sap/opu/odata/sap/API_MEASUREMENTDOCUMENT_0001/MeasurementDocument",
+                "sendQuery": true,
+                "queryParameters": {
+                    "parameters": [
+                        {
+                            "name": "$format",
+                            "value": "json"
+                        }
+                    ]
+                },
+                "options": {}
+            },
+            "id": "read-measurement-docs",
+            "name": "8. Read Measurement Docs",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4,
+            "position": [
+                1780,
+                80
+            ],
+            "onError": "continueErrorOutput"
+        },
+        {
+            "parameters": {
+                "jsCode": "const tanks = $('5. Merge and Validate Data').first().json.tanks;\nconst measDocs = $('8. Read Measurement Docs').first()?.json?.value || [];\nconst strappingMap = {};\nfor (const doc of measDocs) {\n  const loc = doc.MeasuringPoint || doc.StorageLocation;\n  if (loc) strappingMap[loc] = { strappingFactor: parseFloat(doc.MeasuredValue || 1), referenceTemp: 15 };\n}\nreturn tanks.map(t => ({ json: { ...t, strappingFactor: strappingMap[t.tankId]?.strappingFactor ?? 1.0, referenceTemperature: strappingMap[t.tankId]?.referenceTemp ?? 15 } }));"
+            },
+            "id": "build-vcf-request",
+            "name": "8b. Attach Strapping Data",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                1980,
+                80
+            ]
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "={{ $vars.S4_BASE_URL }}/api/hydrocarbon-quantity-conversion/v1/convert",
+                "sendHeaders": true,
+                "headerParameters": {
+                    "parameters": [
+                        {
+                            "name": "Content-Type",
+                            "value": "application/json"
+                        }
+                    ]
+                },
+                "sendBody": true,
+                "specifyBody": "json",
+                "jsonBody": "={\"grossVolume\": {{ $json.grossVolume }}, \"temperature\": {{ $json.temperature }}, \"materialId\": \"{{ $json.material }}\", \"referenceTemperature\": {{ $json.referenceTemperature }}}",
+                "options": {}
+            },
+            "id": "vcf-api-call",
+            "name": "9. Call VCF Conversion API",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4,
+            "position": [
+                2180,
+                80
+            ],
+            "onError": "continueErrorOutput"
+        },
+        {
+            "parameters": {
+                "conditions": {
+                    "string": [
+                        {
+                            "value1": "={{ $json.error }}",
+                            "operation": "isEmpty"
+                        }
+                    ]
+                }
+            },
+            "id": "vcf-api-success",
+            "name": "10. VCF API Success?",
+            "type": "n8n-nodes-base.if",
+            "typeVersion": 1,
+            "position": [
+                2380,
+                80
+            ]
+        },
+        {
+            "parameters": {
+                "jsCode": "const ALPHA = { GASOLINE: 0.00120, DIESEL: 0.00085, CRUDE: 0.00095, DEFAULT: 0.00095 };\nconst tank = $json;\nconst mat = (tank.material || '').toUpperCase();\nconst productType = mat.startsWith('PMS') || mat.startsWith('GAS') ? 'GASOLINE'\n  : mat.startsWith('HSD') || mat.startsWith('DIS') ? 'DIESEL'\n  : mat.startsWith('CRD') || mat.startsWith('CRU') ? 'CRUDE' : 'DEFAULT';\nconst alpha = ALPHA[productType];\nconst T = tank.temperature ?? 15;\nconst Tref = tank.referenceTemperature ?? 15;\nconst vcfFactor = 1 - alpha * (T - Tref);\nconst netVolumePhysical = (tank.grossVolume ?? 0) * vcfFactor;\nreturn [{ json: { ...tank, vcfFactor: Math.round(vcfFactor * 1e6) / 1e6, netVolumePhysical: Math.round(netVolumePhysical * 1000) / 1000, vcfSource: 'ASTM_FALLBACK', vcfApiSuccess: false } }];"
+            },
+            "id": "astm-fallback",
+            "name": "10a. ASTM D1250 Fallback VCF",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                2580,
+                240
+            ]
+        },
+        {
+            "parameters": {
+                "jsCode": "const apiResponse = $json;\nconst tank = $('8b. Attach Strapping Data').item?.json || {};\nconst vcfFactor = apiResponse.vcfFactor ?? apiResponse.conversionFactor ?? 1.0;\nconst netVolumePhysical = apiResponse.netVolume ?? apiResponse.convertedQuantity ?? ((tank.grossVolume || 0) * vcfFactor);\nreturn [{ json: { ...tank, vcfFactor: Math.round(vcfFactor * 1e6) / 1e6, netVolumePhysical: Math.round(netVolumePhysical * 1000) / 1000, vcfSource: 'API', vcfApiSuccess: true } }];"
+            },
+            "id": "vcf-api-extract",
+            "name": "10b. Extract VCF API Result",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                2580,
+                -80
+            ]
+        },
+        {
+            "parameters": {
+                "mode": "mergeByIndex",
+                "options": {}
+            },
+            "id": "merge-vcf-paths",
+            "name": "Merge VCF Paths",
+            "type": "n8n-nodes-base.merge",
+            "typeVersion": 2,
+            "position": [
+                2780,
+                80
+            ]
+        },
+        {
+            "parameters": {
+                "jsCode": "const items = $input.all();\nconst tanks = items.map(i => i.json);\nconst fallbackCount = tanks.filter(t => t.vcfSource === 'ASTM_FALLBACK').length;\nconst runMeta = $('5. Merge and Validate Data').first().json;\nconst m2Message = `M2.achieved: VCF correction complete — ${tanks.length} tanks corrected; fallback_used=${fallbackCount > 0} (${fallbackCount} tanks)`;\nreturn [{ json: { runId: runMeta.runId, runDate: runMeta.runDate, tanks, fallbackCount, m2Message, tankCount: tanks.length } }];"
+            },
+            "id": "collect-vcf-results",
+            "name": "11. Collect VCF Results",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                2980,
+                80
+            ]
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "={{ $vars.CAP_BASE_URL }}/reconciliation/AuditLogEntries",
+                "sendHeaders": true,
+                "headerParameters": {
+                    "parameters": [
+                        {
+                            "name": "Content-Type",
+                            "value": "application/json"
+                        }
+                    ]
+                },
+                "sendBody": true,
+                "bodyParameters": {
+                    "parameters": [
+                        {
+                            "name": "run_ID",
+                            "value": "={{ $json.runId }}"
+                        },
+                        {
+                            "name": "step",
+                            "value": "VCF"
+                        },
+                        {
+                            "name": "milestone",
+                            "value": "M2"
+                        },
+                        {
+                            "name": "outcome",
+                            "value": "ACHIEVED"
+                        },
+                        {
+                            "name": "message",
+                            "value": "={{ $json.m2Message }}"
+                        },
+                        {
+                            "name": "timestamp",
+                            "value": "={{ new Date().toISOString() }}"
+                        },
+                        {
+                            "name": "actor",
+                            "value": "system"
+                        }
+                    ]
+                },
+                "options": {}
+            },
+            "id": "m2-log",
+            "name": "12. M2 Milestone Log",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4,
+            "position": [
+                3180,
+                80
+            ],
+            "onError": "continueRegularOutput"
+        },
+        {
+            "parameters": {
+                "jsCode": "const data = $('11. Collect VCF Results').first().json;\nconst tanks = data.tanks;\nlet okCount = 0, flagCount = 0, urgentCount = 0;\nconst classified = tanks.map(tank => {\n  const net = tank.netVolumePhysical ?? 0;\n  const book = tank.bookStock ?? 0;\n  const delta = net - book;\n  const deltaPercent = book !== 0 ? (Math.abs(delta) / Math.abs(book)) * 100 : 0;\n  const flagPct = tank.flagThresholdPct ?? 0.5;\n  const urgentPct = tank.urgentThresholdPct ?? 1.0;\n  let classification;\n  if (Math.abs(deltaPercent) <= flagPct) { classification = 'OK'; okCount++; }\n  else if (Math.abs(deltaPercent) <= urgentPct) { classification = 'FLAG'; flagCount++; }\n  else { classification = 'URGENT'; urgentCount++; }\n  return { ...tank, delta: Math.round(delta * 1000) / 1000, deltaPercent: Math.round(deltaPercent * 1000) / 1000, classification, postingStatus: 'PENDING' };\n});\nconst m3Message = `M3.achieved: variance classification complete — OK=${okCount}, FLAG=${flagCount}, URGENT=${urgentCount}`;\nreturn [{ json: { runId: data.runId, runDate: data.runDate, tanks: classified, okCount, flagCount, urgentCount, tankCount: classified.length, m3Message, fallbackCount: data.fallbackCount } }];"
+            },
+            "id": "variance-engine",
+            "name": "13-14. Variance Engine",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                3380,
+                80
+            ]
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "={{ $vars.CAP_BASE_URL }}/reconciliation/AuditLogEntries",
+                "sendHeaders": true,
+                "headerParameters": {
+                    "parameters": [
+                        {
+                            "name": "Content-Type",
+                            "value": "application/json"
+                        }
+                    ]
+                },
+                "sendBody": true,
+                "bodyParameters": {
+                    "parameters": [
+                        {
+                            "name": "run_ID",
+                            "value": "={{ $json.runId }}"
+                        },
+                        {
+                            "name": "step",
+                            "value": "VARIANCE"
+                        },
+                        {
+                            "name": "milestone",
+                            "value": "M3"
+                        },
+                        {
+                            "name": "outcome",
+                            "value": "ACHIEVED"
+                        },
+                        {
+                            "name": "message",
+                            "value": "={{ $json.m3Message }}"
+                        },
+                        {
+                            "name": "timestamp",
+                            "value": "={{ new Date().toISOString() }}"
+                        },
+                        {
+                            "name": "actor",
+                            "value": "system"
+                        }
+                    ]
+                },
+                "options": {}
+            },
+            "id": "m3-log",
+            "name": "15. M3 Milestone Log",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4,
+            "position": [
+                3580,
+                80
+            ],
+            "onError": "continueRegularOutput"
+        },
+        {
+            "parameters": {
+                "jsCode": "const data = $('13-14. Variance Engine').first().json;\nreturn data.tanks.map(tank => ({ json: { runId: data.runId, run_ID: data.runId, tankId: tank.tankId, tankName: tank.tankId, material: tank.material, plant: tank.plant, storageLocation: tank.storageLocation, grossVolumeObserved: tank.grossVolume, temperature: tank.temperature, vcfFactor: tank.vcfFactor, vcfSource: tank.vcfSource, netVolumePhysical: tank.netVolumePhysical, bookStock: tank.bookStock, delta: tank.delta, deltaPercent: tank.deltaPercent, flagThresholdPct: tank.flagThresholdPct, urgentThresholdPct: tank.urgentThresholdPct, classification: tank.classification, postingStatus: tank.postingStatus } }));"
+            },
+            "id": "build-tank-results",
+            "name": "16a. Build TankResult Records",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                3780,
+                80
+            ]
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "={{ $vars.CAP_BASE_URL }}/reconciliation/TankResults",
+                "sendHeaders": true,
+                "headerParameters": {
+                    "parameters": [
+                        {
+                            "name": "Content-Type",
+                            "value": "application/json"
+                        }
+                    ]
+                },
+                "sendBody": true,
+                "specifyBody": "json",
+                "jsonBody": "={{ JSON.stringify($json) }}",
+                "options": {}
+            },
+            "id": "save-tank-results",
+            "name": "16b. Save TankResults to CAP",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4,
+            "position": [
+                3980,
+                80
+            ],
+            "onError": "continueRegularOutput"
+        },
+        {
+            "parameters": {
+                "jsCode": "const savedResults = $input.all().map(i => i.json);\nconst varianceData = $('13-14. Variance Engine').first().json;\nconst tankResultMap = {};\nfor (const r of savedResults) { if (r.ID) tankResultMap[r.tankId] = r.ID; }\nconst tanks = varianceData.tanks.map(t => ({ ...t, tankResultId: tankResultMap[t.tankId] || null }));\nreturn [{ json: { ...varianceData, tanks, tankResultMap } }];"
+            },
+            "id": "collect-tank-result-ids",
+            "name": "16c. Collect TankResult IDs",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                4180,
+                80
+            ]
+        },
+        {
+            "parameters": {
+                "jsCode": "const data = $('16c. Collect TankResult IDs').first().json;\nconst okFlag = data.tanks.filter(t => t.classification === 'OK' || t.classification === 'FLAG');\nconst urgent = data.tanks.filter(t => t.classification === 'URGENT');\nreturn [{ json: { ...data, okFlagTanks: okFlag, urgentTanks: urgent, hasUrgent: urgent.length > 0, hasOkFlag: okFlag.length > 0 } }];"
+            },
+            "id": "split-by-classification",
+            "name": "17. Split by Classification",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                4380,
+                80
+            ]
+        },
+        {
+            "parameters": {
+                "conditions": {
+                    "boolean": [
+                        {
+                            "value1": "={{ $json.hasUrgent }}",
+                            "value2": true
+                        }
+                    ]
+                }
+            },
+            "id": "has-urgent-check",
+            "name": "17b. Has URGENT Tanks?",
+            "type": "n8n-nodes-base.if",
+            "typeVersion": 1,
+            "position": [
+                4580,
+                80
+            ]
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "={{ $vars.BTP_ANS_URL }}/v1/notifications/recipients/custom",
+                "sendHeaders": true,
+                "headerParameters": {
+                    "parameters": [
+                        {
+                            "name": "Content-Type",
+                            "value": "application/json"
+                        },
+                        {
+                            "name": "Authorization",
+                            "value": "=Bearer {{ $vars.BTP_ANS_TOKEN }}"
+                        }
+                    ]
+                },
+                "sendBody": true,
+                "specifyBody": "json",
+                "jsonBody": "={\"eventType\":\"TankReconciliationUrgentVariance\",\"severity\":\"FATAL\",\"subject\":\"URGENT Tank Variance Requires Approval - {{ $json.runDate }}\",\"body\":\"{{ $json.urgentCount }} tank(s) have URGENT variances requiring supervisor approval. Run: {{ $json.runId }}\"}",
+                "options": {}
+            },
+            "id": "urgent-alert-ans",
+            "name": "18b. URGENT Alert BTP ANS",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4,
+            "position": [
+                4780,
+                -80
+            ],
+            "onError": "continueRegularOutput"
+        },
+        {
+            "parameters": {
+                "method": "PATCH",
+                "url": "={{ $vars.CAP_BASE_URL }}/reconciliation/ReconciliationRuns({{ $json.runId }})",
+                "sendHeaders": true,
+                "headerParameters": {
+                    "parameters": [
+                        {
+                            "name": "Content-Type",
+                            "value": "application/json"
+                        }
+                    ]
+                },
+                "sendBody": true,
+                "bodyParameters": {
+                    "parameters": [
+                        {
+                            "name": "status",
+                            "value": "AWAITING_APPROVAL"
+                        },
+                        {
+                            "name": "urgentCount",
+                            "value": "={{ $json.urgentCount }}"
+                        },
+                        {
+                            "name": "flagCount",
+                            "value": "={{ $json.flagCount }}"
+                        },
+                        {
+                            "name": "okCount",
+                            "value": "={{ $json.okCount }}"
+                        },
+                        {
+                            "name": "tankCount",
+                            "value": "={{ $json.tankCount }}"
+                        }
+                    ]
+                },
+                "options": {}
+            },
+            "id": "set-awaiting-approval",
+            "name": "18b. Set Run AWAITING APPROVAL",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4,
+            "position": [
+                4980,
+                -80
+            ],
+            "onError": "continueRegularOutput"
+        },
+        {
+            "parameters": {
+                "httpMethod": "POST",
+                "path": "tank-reconciliation/approval-callback",
+                "responseMode": "lastNode",
+                "options": {}
+            },
+            "id": "approval-webhook-wait",
+            "name": "19. Wait Approval Callback",
+            "type": "n8n-nodes-base.webhook",
+            "typeVersion": 1,
+            "position": [
+                5180,
+                -80
+            ]
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "={{ $vars.CAP_BASE_URL }}/reconciliation/AuditLogEntries",
+                "sendHeaders": true,
+                "headerParameters": {
+                    "parameters": [
+                        {
+                            "name": "Content-Type",
+                            "value": "application/json"
+                        }
+                    ]
+                },
+                "sendBody": true,
+                "bodyParameters": {
+                    "parameters": [
+                        {
+                            "name": "run_ID",
+                            "value": "={{ $json.runId || $('17. Split by Classification').first().json.runId }}"
+                        },
+                        {
+                            "name": "step",
+                            "value": "APPROVAL"
+                        },
+                        {
+                            "name": "milestone",
+                            "value": "M4"
+                        },
+                        {
+                            "name": "outcome",
+                            "value": "ACHIEVED"
+                        },
+                        {
+                            "name": "message",
+                            "value": "=M4.achieved: approval decision received — decision={{ $json.decision || 'N/A' }}, tankResultId={{ $json.tankResultId || 'N/A' }}"
+                        },
+                        {
+                            "name": "timestamp",
+                            "value": "={{ new Date().toISOString() }}"
+                        },
+                        {
+                            "name": "actor",
+                            "value": "={{ $json.decidedBy || 'supervisor' }}"
+                        }
+                    ]
+                },
+                "options": {}
+            },
+            "id": "m4-log",
+            "name": "19b. M4 Milestone Log",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4,
+            "position": [
+                5180,
+                80
+            ],
+            "onError": "continueRegularOutput"
+        },
+        {
+            "parameters": {
+                "jsCode": "const splitData = $('17. Split by Classification').first().json;\nconst approvalData = $input.first()?.json || {};\nlet tanksToPost = [];\nif (approvalData.decision && approvalData.tankResultId) {\n  tanksToPost = splitData.urgentTanks.filter(t => t.tankResultId === approvalData.tankResultId && approvalData.decision === 'APPROVED');\n} else {\n  tanksToPost = splitData.okFlagTanks || [];\n}\nreturn tanksToPost.map(tank => ({ json: { runId: splitData.runId, runDate: splitData.runDate, tankId: tank.tankId, tankResultId: tank.tankResultId, material: tank.material, plant: tank.plant, storageLocation: tank.storageLocation, delta: tank.delta, goodsMovementType: (tank.delta < 0 ? '551' : '552'), quantity: Math.abs(tank.delta), classification: tank.classification } }));"
+            },
+            "id": "build-goods-movement",
+            "name": "20a. Build Goods Movement",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                5380,
+                80
+            ]
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "={{ $vars.S4_BASE_URL }}/sap/opu/odata/sap/API_MATERIAL_DOCUMENT_SRV/A_MaterialDocumentHeader",
+                "sendHeaders": true,
+                "headerParameters": {
+                    "parameters": [
+                        {
+                            "name": "Content-Type",
+                            "value": "application/json"
+                        },
+                        {
+                            "name": "Accept",
+                            "value": "application/json"
+                        }
+                    ]
+                },
+                "sendBody": true,
+                "specifyBody": "json",
+                "jsonBody": "={\"GoodsMovementCode\":\"05\",\"DocumentDate\":\"{{ $json.runDate }}\",\"PostingDate\":\"{{ $json.runDate }}\",\"to_MaterialDocumentItem\":[{\"Material\":\"{{ $json.material }}\",\"Plant\":\"{{ $json.plant }}\",\"StorageLocation\":\"{{ $json.storageLocation }}\",\"InventoryValuationType\":\"\",\"GoodsMovementType\":\"{{ $json.goodsMovementType }}\",\"Quantity\":\"{{ $json.quantity }}\",\"QuantityUnit\":\"L\"}]}",
+                "options": {}
+            },
+            "id": "post-material-doc",
+            "name": "20b. Post Material Document S4",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4,
+            "position": [
+                5580,
+                80
+            ],
+            "onError": "continueErrorOutput"
+        },
+        {
+            "parameters": {
+                "jsCode": "const results = $input.all();\nconst postedTanks = [];\nconst failedTanks = [];\nfor (const item of results) {\n  const resp = item.json;\n  const docNumber = resp.MaterialDocumentYear ? `${resp.MaterialDocument}/${resp.MaterialDocumentYear}` : (resp.MaterialDocumentHeaderUUID || resp.MaterialDocument || null);\n  if (docNumber) { postedTanks.push({ tankId: resp.tankId || 'unknown', materialDocNumber: docNumber }); }\n  else if (resp.error) { failedTanks.push({ tankId: resp.tankId || 'unknown', error: resp.error?.message || JSON.stringify(resp.error) }); }\n}\nconst varianceData = $('13-14. Variance Engine').first().json;\nconst m5Message = failedTanks.length === 0\n  ? `M5.achieved: goods movements posted — ${postedTanks.length} documents created`\n  : `M5.mixed: posted ${postedTanks.length}, failed ${failedTanks.length} tanks`;\nreturn [{ json: { runId: varianceData.runId, runDate: varianceData.runDate, okCount: varianceData.okCount, flagCount: varianceData.flagCount, urgentCount: varianceData.urgentCount, tankCount: varianceData.tankCount, postedTanks, failedTanks, m5Message, fallbackCount: varianceData.fallbackCount } }];"
+            },
+            "id": "collect-posting-results",
+            "name": "20c. Collect Posting Results",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                5780,
+                80
+            ]
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "={{ $vars.CAP_BASE_URL }}/reconciliation/AuditLogEntries",
+                "sendHeaders": true,
+                "headerParameters": {
+                    "parameters": [
+                        {
+                            "name": "Content-Type",
+                            "value": "application/json"
+                        }
+                    ]
+                },
+                "sendBody": true,
+                "bodyParameters": {
+                    "parameters": [
+                        {
+                            "name": "run_ID",
+                            "value": "={{ $json.runId }}"
+                        },
+                        {
+                            "name": "step",
+                            "value": "POST"
+                        },
+                        {
+                            "name": "milestone",
+                            "value": "M5"
+                        },
+                        {
+                            "name": "outcome",
+                            "value": "={{ $json.failedTanks.length === 0 ? 'ACHIEVED' : 'PARTIAL' }}"
+                        },
+                        {
+                            "name": "message",
+                            "value": "={{ $json.m5Message }}"
+                        },
+                        {
+                            "name": "timestamp",
+                            "value": "={{ new Date().toISOString() }}"
+                        },
+                        {
+                            "name": "actor",
+                            "value": "system"
+                        }
+                    ]
+                },
+                "options": {}
+            },
+            "id": "m5-log",
+            "name": "21. M5 Milestone Log",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4,
+            "position": [
+                5980,
+                80
+            ],
+            "onError": "continueRegularOutput"
+        },
+        {
+            "parameters": {
+                "method": "PATCH",
+                "url": "={{ $vars.CAP_BASE_URL }}/reconciliation/ReconciliationRuns({{ $json.runId }})",
+                "sendHeaders": true,
+                "headerParameters": {
+                    "parameters": [
+                        {
+                            "name": "Content-Type",
+                            "value": "application/json"
+                        }
+                    ]
+                },
+                "sendBody": true,
+                "bodyParameters": {
+                    "parameters": [
+                        {
+                            "name": "status",
+                            "value": "COMPLETE"
+                        },
+                        {
+                            "name": "okCount",
+                            "value": "={{ $json.okCount }}"
+                        },
+                        {
+                            "name": "flagCount",
+                            "value": "={{ $json.flagCount }}"
+                        },
+                        {
+                            "name": "urgentCount",
+                            "value": "={{ $json.urgentCount }}"
+                        },
+                        {
+                            "name": "tankCount",
+                            "value": "={{ $json.tankCount }}"
+                        }
+                    ]
+                },
+                "options": {}
+            },
+            "id": "update-run-status",
+            "name": "22. Update Run Status COMPLETE",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4,
+            "position": [
+                6180,
+                80
+            ],
+            "onError": "continueRegularOutput"
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "={{ $vars.BTP_ANS_URL }}/v1/notifications/recipients/custom",
+                "sendHeaders": true,
+                "headerParameters": {
+                    "parameters": [
+                        {
+                            "name": "Content-Type",
+                            "value": "application/json"
+                        },
+                        {
+                            "name": "Authorization",
+                            "value": "=Bearer {{ $vars.BTP_ANS_TOKEN }}"
+                        }
+                    ]
+                },
+                "sendBody": true,
+                "specifyBody": "json",
+                "jsonBody": "={\"eventType\":\"TankReconciliationComplete\",\"severity\":\"{{ $json.urgentCount > 0 ? 'FATAL' : $json.flagCount > 0 ? 'WARNING' : 'INFO' }}\",\"subject\":\"Tank Reconciliation {{ $json.runDate }} Complete\",\"body\":\"Run complete: OK={{ $json.okCount }}, FLAG={{ $json.flagCount }}, URGENT={{ $json.urgentCount }}\"}",
+                "options": {}
+            },
+            "id": "btp-alert",
+            "name": "23. BTP Alert Notification",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4,
+            "position": [
+                6380,
+                80
+            ],
+            "onError": "continueRegularOutput"
+        },
+        {
+            "parameters": {
+                "jsCode": "const data = $input.first().json;\nconst tanksData = $('13-14. Variance Engine').first().json;\nconst pdfPayload = { runDate: data.runDate, runId: data.runId, generatedAt: new Date().toISOString(), summary: { ok: data.okCount, flag: data.flagCount, urgent: data.urgentCount, total: data.tankCount, vcfFallbackUsed: (data.fallbackCount || 0) > 0 }, tanks: tanksData.tanks.map(t => ({ tankId: t.tankId, grossVolume: t.grossVolume, temperature: t.temperature, vcfFactor: t.vcfFactor, vcfSource: t.vcfSource, netVolumePhysical: t.netVolumePhysical, bookStock: t.bookStock, delta: t.delta, deltaPercent: t.deltaPercent, classification: t.classification, postingStatus: t.postingStatus || 'PENDING', materialDocNumber: t.materialDocNumber || null })) };\nconst emailBody = `Reconciliation report for ${data.runDate}.\\nOK: ${data.okCount}, FLAG: ${data.flagCount}, URGENT: ${data.urgentCount}.\\nTotal: ${data.tankCount} tanks.`;\nreturn [{ json: { ...data, pdfPayload, emailSubject: `Tank Reconciliation Report - ${data.runDate}`, emailBody } }];"
+            },
+            "id": "build-report",
+            "name": "24. Build PDF Report Payload",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                6580,
+                80
+            ]
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "={{ $vars.BTP_ANS_URL }}/v1/notifications/recipients/custom",
+                "sendHeaders": true,
+                "headerParameters": {
+                    "parameters": [
+                        {
+                            "name": "Content-Type",
+                            "value": "application/json"
+                        },
+                        {
+                            "name": "Authorization",
+                            "value": "=Bearer {{ $vars.BTP_ANS_TOKEN }}"
+                        }
+                    ]
+                },
+                "sendBody": true,
+                "specifyBody": "json",
+                "jsonBody": "={\"eventType\":\"TankReconciliationReport\",\"severity\":\"{{ $json.urgentCount > 0 ? 'FATAL' : $json.flagCount > 0 ? 'WARNING' : 'INFO' }}\",\"subject\":\"{{ $json.emailSubject }}\",\"body\":\"{{ $json.emailBody }}\",\"recipients\":\"{{ $vars.REPORT_EMAIL_RECIPIENTS }}\"}",
+                "options": {}
+            },
+            "id": "send-email-report",
+            "name": "25. Send Email Report",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4,
+            "position": [
+                6780,
+                80
+            ],
+            "onError": "continueRegularOutput"
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "={{ $vars.TEAMS_WEBHOOK_URL }}",
+                "sendHeaders": true,
+                "headerParameters": {
+                    "parameters": [
+                        {
+                            "name": "Content-Type",
+                            "value": "application/json"
+                        }
+                    ]
+                },
+                "sendBody": true,
+                "specifyBody": "json",
+                "jsonBody": "={\"@type\":\"MessageCard\",\"@context\":\"http://schema.org/extensions\",\"summary\":\"Tank Reconciliation {{ $json.runDate }}\",\"themeColor\":\"{{ $json.urgentCount > 0 ? 'FF0000' : $json.flagCount > 0 ? 'FFA500' : '00AA00' }}\",\"title\":\"Tank Reconciliation {{ $json.runDate }}\",\"text\":\"OK={{ $json.okCount }}, FLAG={{ $json.flagCount }}, URGENT={{ $json.urgentCount }}. Total: {{ $json.tankCount }} tanks.\"}",
+                "options": {}
+            },
+            "id": "teams-notification",
+            "name": "26. MS Teams Notification",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4,
+            "position": [
+                6980,
+                80
+            ],
+            "onError": "continueRegularOutput"
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "={{ $vars.CAP_BASE_URL }}/reconciliation/AuditLogEntries",
+                "sendHeaders": true,
+                "headerParameters": {
+                    "parameters": [
+                        {
+                            "name": "Content-Type",
+                            "value": "application/json"
+                        }
+                    ]
+                },
+                "sendBody": true,
+                "bodyParameters": {
+                    "parameters": [
+                        {
+                            "name": "run_ID",
+                            "value": "={{ $json.runId }}"
+                        },
+                        {
+                            "name": "step",
+                            "value": "REPORT"
+                        },
+                        {
+                            "name": "milestone",
+                            "value": "M6"
+                        },
+                        {
+                            "name": "outcome",
+                            "value": "ACHIEVED"
+                        },
+                        {
+                            "name": "message",
+                            "value": "=M6.achieved: reconciliation report distributed via email and Teams"
+                        },
+                        {
+                            "name": "timestamp",
+                            "value": "={{ new Date().toISOString() }}"
+                        },
+                        {
+                            "name": "actor",
+                            "value": "system"
+                        }
+                    ]
+                },
+                "options": {}
+            },
+            "id": "m6-log",
+            "name": "27. M6 Milestone Log",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4,
+            "position": [
+                7180,
+                80
+            ],
+            "onError": "continueRegularOutput"
+        },
+        {
+            "parameters": {},
+            "id": "error-trigger",
+            "name": "Error Trigger",
+            "type": "n8n-nodes-base.errorTrigger",
+            "typeVersion": 1,
+            "position": [
+                7200,
+                340
+            ]
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "={{ $vars.BTP_ANS_URL }}/v1/notifications/recipients/custom",
+                "sendHeaders": true,
+                "headerParameters": {
+                    "parameters": [
+                        {
+                            "name": "Content-Type",
+                            "value": "application/json"
+                        },
+                        {
+                            "name": "Authorization",
+                            "value": "=Bearer {{ $vars.BTP_ANS_TOKEN }}"
+                        }
+                    ]
+                },
+                "sendBody": true,
+                "specifyBody": "json",
+                "jsonBody": "={\"eventType\":\"TankReconciliationError\",\"severity\":\"FATAL\",\"subject\":\"Tank Reconciliation FAILED\",\"body\":\"Workflow error: {{ $json.message || 'Unknown error' }} at node: {{ $json.node?.name || 'unknown' }}\"}",
+                "options": {}
+            },
+            "id": "error-alert",
+            "name": "ERR. Alert on Error",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4,
+            "position": [
+                7400,
+                340
+            ],
+            "onError": "continueRegularOutput"
+        }
+    ],
+    "connections": {
+        "Daily Scheduler 06:00": {
+            "main": [
+                [
+                    {
+                        "node": "Merge Triggers",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Webhook Trigger": {
+            "main": [
+                [
+                    {
+                        "node": "Merge Triggers",
+                        "type": "main",
+                        "index": 1
+                    }
+                ]
+            ]
+        },
+        "Merge Triggers": {
+            "main": [
+                [
+                    {
+                        "node": "Normalize Trigger Input",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Normalize Trigger Input": {
+            "main": [
+                [
+                    {
+                        "node": "1. Initialize Run",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "1. Initialize Run": {
+            "main": [
+                [
+                    {
+                        "node": "Extract runId",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Extract runId": {
+            "main": [
+                [
+                    {
+                        "node": "2. ATG Ingest",
+                        "type": "main",
+                        "index": 0
+                    },
+                    {
+                        "node": "3. Fiori Physical Inventory Ingest",
+                        "type": "main",
+                        "index": 0
+                    },
+                    {
+                        "node": "4. HPM Book Stock Read",
+                        "type": "main",
+                        "index": 0
+                    },
+                    {
+                        "node": "2b. Fetch Tank Config",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "2. ATG Ingest": {
+            "main": [
+                [
+                    {
+                        "node": "5. Merge and Validate Data",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "3. Fiori Physical Inventory Ingest": {
+            "main": [
+                [
+                    {
+                        "node": "5. Merge and Validate Data",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "4. HPM Book Stock Read": {
+            "main": [
+                [
+                    {
+                        "node": "5. Merge and Validate Data",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "2b. Fetch Tank Config": {
+            "main": [
+                [
+                    {
+                        "node": "5. Merge and Validate Data",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "5. Merge and Validate Data": {
+            "main": [
+                [
+                    {
+                        "node": "6. M1 Milestone Log",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "6. M1 Milestone Log": {
+            "main": [
+                [
+                    {
+                        "node": "7. Completeness Check",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "7. Completeness Check": {
+            "main": [
+                [
+                    {
+                        "node": "8. Read Measurement Docs",
+                        "type": "main",
+                        "index": 0
+                    }
+                ],
+                [
+                    {
+                        "node": "7a. Halt URGENT Alert",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "7a. Halt URGENT Alert": {
+            "main": [
+                [
+                    {
+                        "node": "7b. Set Run FAILED",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "8. Read Measurement Docs": {
+            "main": [
+                [
+                    {
+                        "node": "8b. Attach Strapping Data",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "8b. Attach Strapping Data": {
+            "main": [
+                [
+                    {
+                        "node": "9. Call VCF Conversion API",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "9. Call VCF Conversion API": {
+            "main": [
+                [
+                    {
+                        "node": "10. VCF API Success?",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "10. VCF API Success?": {
+            "main": [
+                [
+                    {
+                        "node": "10b. Extract VCF API Result",
+                        "type": "main",
+                        "index": 0
+                    }
+                ],
+                [
+                    {
+                        "node": "10a. ASTM D1250 Fallback VCF",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "10b. Extract VCF API Result": {
+            "main": [
+                [
+                    {
+                        "node": "Merge VCF Paths",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "10a. ASTM D1250 Fallback VCF": {
+            "main": [
+                [
+                    {
+                        "node": "Merge VCF Paths",
+                        "type": "main",
+                        "index": 1
+                    }
+                ]
+            ]
+        },
+        "Merge VCF Paths": {
+            "main": [
+                [
+                    {
+                        "node": "11. Collect VCF Results",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "11. Collect VCF Results": {
+            "main": [
+                [
+                    {
+                        "node": "12. M2 Milestone Log",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "12. M2 Milestone Log": {
+            "main": [
+                [
+                    {
+                        "node": "13-14. Variance Engine",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "13-14. Variance Engine": {
+            "main": [
+                [
+                    {
+                        "node": "15. M3 Milestone Log",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "15. M3 Milestone Log": {
+            "main": [
+                [
+                    {
+                        "node": "16a. Build TankResult Records",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "16a. Build TankResult Records": {
+            "main": [
+                [
+                    {
+                        "node": "16b. Save TankResults to CAP",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "16b. Save TankResults to CAP": {
+            "main": [
+                [
+                    {
+                        "node": "16c. Collect TankResult IDs",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "16c. Collect TankResult IDs": {
+            "main": [
+                [
+                    {
+                        "node": "17. Split by Classification",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "17. Split by Classification": {
+            "main": [
+                [
+                    {
+                        "node": "17b. Has URGENT Tanks?",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "17b. Has URGENT Tanks?": {
+            "main": [
+                [
+                    {
+                        "node": "18b. URGENT Alert BTP ANS",
+                        "type": "main",
+                        "index": 0
+                    }
+                ],
+                [
+                    {
+                        "node": "20a. Build Goods Movement",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "18b. URGENT Alert BTP ANS": {
+            "main": [
+                [
+                    {
+                        "node": "18b. Set Run AWAITING APPROVAL",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "18b. Set Run AWAITING APPROVAL": {
+            "main": [
+                [
+                    {
+                        "node": "19. Wait Approval Callback",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "19. Wait Approval Callback": {
+            "main": [
+                [
+                    {
+                        "node": "19b. M4 Milestone Log",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "19b. M4 Milestone Log": {
+            "main": [
+                [
+                    {
+                        "node": "20a. Build Goods Movement",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "20a. Build Goods Movement": {
+            "main": [
+                [
+                    {
+                        "node": "20b. Post Material Document S4",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "20b. Post Material Document S4": {
+            "main": [
+                [
+                    {
+                        "node": "20c. Collect Posting Results",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "20c. Collect Posting Results": {
+            "main": [
+                [
+                    {
+                        "node": "21. M5 Milestone Log",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "21. M5 Milestone Log": {
+            "main": [
+                [
+                    {
+                        "node": "22. Update Run Status COMPLETE",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "22. Update Run Status COMPLETE": {
+            "main": [
+                [
+                    {
+                        "node": "23. BTP Alert Notification",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "23. BTP Alert Notification": {
+            "main": [
+                [
+                    {
+                        "node": "24. Build PDF Report Payload",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "24. Build PDF Report Payload": {
+            "main": [
+                [
+                    {
+                        "node": "25. Send Email Report",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "25. Send Email Report": {
+            "main": [
+                [
+                    {
+                        "node": "26. MS Teams Notification",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "26. MS Teams Notification": {
+            "main": [
+                [
+                    {
+                        "node": "27. M6 Milestone Log",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Error Trigger": {
+            "main": [
+                [
+                    {
+                        "node": "ERR. Alert on Error",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        }
+    },
+    "settings": {
+        "executionOrder": "v1",
+        "saveManualExecutions": true,
+        "callerPolicy": "workflowsFromSameOwner",
+        "errorWorkflow": ""
+    },
+    "staticData": null,
+    "meta": {
+        "templateCredsSetupCompleted": true
+    },
+    "pinData": {},
+    "versionId": "b0b3cdb5-c46f-4a12-96fe-7690063c61ac",
+    "triggerCount": 0,
+    "tags": [
+        {
+            "createdAt": "2024-01-01T00:00:00.000Z",
+            "updatedAt": "2024-01-01T00:00:00.000Z",
+            "id": "1",
+            "name": "tank-reconciliation"
+        }
+    ],
+    "id": "tgt9XpUk1koOGPcv"
+}

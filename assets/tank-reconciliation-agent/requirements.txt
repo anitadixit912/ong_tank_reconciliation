@@ -1,0 +1,16 @@
+# CF runtime requirements (used by Cloud Foundry Python buildpack)
+# sap-ai-sdk-gen==6.6.0 requires langchain~=1.2.10 — pin to compatible range
+langchain~=1.2.10
+langchain-core>=1.3,<2.0
+langgraph>=1.2,<2.0
+a2a-sdk[all]==0.3.22
+fastapi!=0.136.3
+uvicorn==0.40.0
+httpx==0.28.1
+python-dotenv==1.2.2
+mcp>=1.0.0
+opentelemetry-instrumentation-starlette
+sap-ai-sdk-gen==6.6.0
+gunicorn~=22.0
+PyYAML==6.0.3
+pydantic

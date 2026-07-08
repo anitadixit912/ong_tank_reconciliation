@@ -1,0 +1,41 @@
+{
+  "name": "tank-reconciliation-cap",
+  "version": "1.0.0",
+  "dependencies": {
+    "@sap/cds": "^9",
+    "@sap/xssec": "^3",
+    "@cap-js/hana": "^2",
+    "passport": "^0"
+  },
+  "devDependencies": {
+    "@cap-js/sqlite": "^2.4",
+    "@cap-js/cds-test": "^1",
+    "@sap/cds-dk": "^10"
+  },
+  "scripts": {
+    "start": "node node_modules/@sap/cds/bin/serve.js all --production",
+    "test": "node --test --test-reporter=spec --test-reporter-destination=stdout --test-reporter=junit --test-reporter-destination=test-results.xml",
+    "custom_build": "node build.js"
+  },
+  "cds": {
+    "requires": {
+      "db": {
+        "kind": "sqlite",
+        "credentials": { "url": ":memory:" },
+        "[production]": {
+          "kind": "hana"
+        }
+      },
+      "auth": {
+        "kind": "dummy",
+        "[production]": {
+          "kind": "xsuaa"
+        }
+      }
+    }
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "private": true
+}

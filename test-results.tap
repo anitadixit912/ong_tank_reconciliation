@@ -1,0 +1,70 @@
+TAP version 13
+# Subtest: triggerRun: creates run and M1 audit log
+ok 1 - triggerRun: creates run and M1 audit log
+  ---
+  duration_ms: 403.794891
+  type: 'test'
+  ...
+# Subtest: triggerRun: rejects missing runDate
+ok 2 - triggerRun: rejects missing runDate
+  ---
+  duration_ms: 1.055279
+  type: 'test'
+  ...
+# Subtest: triggerRun: rejects duplicate run for same date
+ok 3 - triggerRun: rejects duplicate run for same date
+  ---
+  duration_ms: 4.003592
+  type: 'test'
+  ...
+# Subtest: approvePosting: creates approval record and M4 audit log
+ok 4 - approvePosting: creates approval record and M4 audit log
+  ---
+  duration_ms: 9.347626
+  type: 'test'
+  ...
+# Subtest: approvePosting: rejects missing tankResultId
+ok 5 - approvePosting: rejects missing tankResultId
+  ---
+  duration_ms: 0.506433
+  type: 'test'
+  ...
+# Subtest: approvePosting: rejects non-existent tank
+ok 6 - approvePosting: rejects non-existent tank
+  ---
+  duration_ms: 1.300714
+  type: 'test'
+  ...
+# Subtest: approvePosting: rejects non-URGENT classification
+ok 7 - approvePosting: rejects non-URGENT classification
+  ---
+  duration_ms: 3.36087
+  type: 'test'
+  ...
+# Subtest: rejectPosting: sets REJECTED status and stores reason
+ok 8 - rejectPosting: sets REJECTED status and stores reason
+  ---
+  duration_ms: 6.303665
+  type: 'test'
+  ...
+# Subtest: rejectPosting: rejects empty comment
+ok 9 - rejectPosting: rejects empty comment
+  ---
+  duration_ms: 2.526199
+  type: 'test'
+  ...
+# Subtest: rejectPosting: rejects missing comment
+ok 10 - rejectPosting: rejects missing comment
+  ---
+  duration_ms: 2.462514
+  type: 'test'
+  ...
+1..10
+# tests 10
+# suites 0
+# pass 10
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 557.795583

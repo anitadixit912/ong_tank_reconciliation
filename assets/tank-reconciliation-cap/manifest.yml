@@ -1,0 +1,21 @@
+---
+# Cloud Foundry deployment manifest for the Tank Reconciliation CAP backend.
+# The platform substitutes ${...} variables from the MTA extension or cf push --var flags.
+applications:
+  - name: tank-reconciliation-cap-srv
+    path: gen/srv
+    memory: 256M
+    disk_quota: 512M
+    instances: 1
+    buildpacks:
+      - nodejs_buildpack
+    command: node node_modules/@sap/cds/bin/serve.js all --production
+    health-check-type: http
+    health-check-http-endpoint: /reconciliation
+    timeout: 120
+    services:
+      - tank-reconciliation-hdi
+      - tank-reconciliation-xsuaa
+    env:
+      NODE_ENV: production
+      CDS_ENV: production
