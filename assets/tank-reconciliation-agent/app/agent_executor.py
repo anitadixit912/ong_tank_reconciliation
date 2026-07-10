@@ -44,7 +44,8 @@ class AgentExecutor(A2AAgentExecutor):
             # In Joule runtime, also load MCP tools
             if os.environ.get("JOULE_RUNTIME"):
                 try:
-                    user_token = [REDACTED]                    mcp_tools = await get_mcp_tools(user_token=[REDACTED] or []
+                    user_token = get_user_token()
+                    mcp_tools = await get_mcp_tools(user_token=user_token) or []
                     tools = [*mcp_tools, *tools]
                 except Exception:
                     logger.exception("Failed to load MCP tools")

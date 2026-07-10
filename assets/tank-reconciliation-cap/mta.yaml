@@ -1,7 +1,7 @@
 _schema-version: '3.1'
 ID: tank-reconciliation-cap
 version: 1.0.0
-description: "Tank Stock Reconciliation CAP backend — HDI deployer + Node.js service"
+description: "Tank Stock Reconciliation CAP backend - HDI deployer + Node.js service"
 
 parameters:
   enable-parallel-deployments: true
@@ -13,7 +13,7 @@ build-parameters:
         - npm run custom_build
 
 modules:
-  # ── HDI database deployer ──────────────────────────────────────────────────
+  # -- HDI database deployer --------------------------------------------------
   - name: tank-reconciliation-cap-db-deployer
     type: hdb
     path: gen/db
@@ -22,7 +22,7 @@ modules:
     requires:
       - name: tank-reconciliation-hdi
 
-  # ── CAP Node.js service ────────────────────────────────────────────────────
+  # -- CAP Node.js service ----------------------------------------------------
   - name: tank-reconciliation-cap-srv
     type: nodejs
     path: gen/srv
@@ -40,9 +40,10 @@ modules:
     requires:
       - name: tank-reconciliation-hdi
       - name: tank-reconciliation-xsuaa
+      - name: tank-reconciliation-destination
 
 resources:
-  # ── SAP HANA HDI container ─────────────────────────────────────────────────
+  # -- SAP HANA HDI container -------------------------------------------------
   - name: tank-reconciliation-hdi
     type: com.sap.xs.hdi-container
     parameters:
@@ -51,10 +52,17 @@ resources:
     properties:
       hdi-service-name: '${service-name}'
 
-  # ── XSUAA (app-level auth) ─────────────────────────────────────────────────
+  # -- XSUAA (app-level auth) -------------------------------------------------
   - name: tank-reconciliation-xsuaa
     type: org.cloudfoundry.managed-service
     parameters:
       service: xsuaa
       service-plan: application
       path: ./xs-security.json
+
+  # -- Destination service (S4HANA_PUBLIC_CLOUD + AI Core) -------------------
+  - name: tank-reconciliation-destination
+    type: org.cloudfoundry.managed-service
+    parameters:
+      service: destination
+      service-plan: lite

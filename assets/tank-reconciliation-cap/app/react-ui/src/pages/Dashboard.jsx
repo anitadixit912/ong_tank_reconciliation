@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { fetchRuns, triggerRun, retriggerDataCollection } from '../api.js';
+import { fetchRuns, fetchPendingApprovals, triggerRun, retriggerDataCollection } from '../api.js';
 import StatusBadge from '../components/StatusBadge.jsx';
 import KpiTile from '../components/KpiTile.jsx';
 
@@ -16,14 +16,19 @@ export default function Dashboard() {
   const [triggerDate, setTriggerDate] = useState(todayIso());
   const [triggering, setTriggering] = useState(false);
   const [triggerMsg, setTriggerMsg] = useState(null);
-  const [retriggering, setRetriggering] = useState(null); // holds runId being re-triggered
+  const [retriggering, setRetriggering] = useState(null);
+  const [pendingUrgent, setPendingUrgent] = useState(0);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const data = await fetchRuns({ top: 30 });
+      const [data, pending] = await Promise.all([
+        fetchRuns({ top: 30 }),
+        fetchPendingApprovals()
+      ]);
       setRuns(data);
+      setPendingUrgent(pending.length);
     } catch (e) {
       setError(e.message);
     } finally {
@@ -33,12 +38,11 @@ export default function Dashboard() {
 
   useEffect(() => { load(); }, [load]);
 
-  // KPIs from latest run
+  // KPIs
   const latest = runs[0];
-  const totalTanks = latest?.tankCount ?? 0;
-  const urgentCount = runs.reduce((a, r) => a + (r.urgentCount || 0), 0);
+  const totalTanks      = latest?.tankCount ?? 0;
   const awaitingApproval = runs.filter(r => r.status === 'AWAITING_APPROVAL').length;
-  const failedRuns = runs.filter(r => r.status === 'FAILED').length;
+  const failedRuns      = runs.filter(r => r.status === 'FAILED').length;
 
   // R11: Re-trigger data collection for a FAILED or PENDING run
   async function handleRetrigger(runId, runDate) {
@@ -75,11 +79,11 @@ export default function Dashboard() {
 
       {/* KPI tiles */}
       <div className="kpi-grid">
-        <KpiTile label="Total Runs" value={runs.length} />
-        <KpiTile label="Latest Tanks" value={totalTanks} />
-        <KpiTile label="Urgent Variances" value={urgentCount} className="urgent" />
-        <KpiTile label="Awaiting Approval" value={awaitingApproval} className={awaitingApproval > 0 ? 'flag' : ''} />
-        <KpiTile label="Failed Runs" value={failedRuns} className={failedRuns > 0 ? 'urgent' : ''} />
+        <KpiTile label="Total Runs"        value={runs.length}       onClick={() => navigate('/')} />
+        <KpiTile label="Latest Tanks"      value={totalTanks}        onClick={() => navigate('/configuration')} />
+        <KpiTile label="Urgent Variances"  value={pendingUrgent}     className={pendingUrgent > 0 ? 'urgent' : ''}  onClick={() => navigate('/approvals')} />
+        <KpiTile label="Awaiting Approval" value={awaitingApproval}  className={awaitingApproval > 0 ? 'flag' : ''} onClick={() => navigate('/approvals')} />
+        <KpiTile label="Failed Runs"       value={failedRuns}        className={failedRuns > 0 ? 'urgent' : ''}  onClick={() => navigate('/')} />
       </div>
 
       {/* Trigger new run */}

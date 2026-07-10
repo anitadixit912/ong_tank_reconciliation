@@ -2,15 +2,15 @@
   "name": "tank-reconciliation-cap",
   "version": "1.0.0",
   "dependencies": {
-    "@sap/cds": "^9",
-    "@sap/xssec": "^3",
     "@cap-js/hana": "^2",
+    "@cap-js/sqlite": "^2.4",
+    "@sap/cds": "^9",
+    "@sap/xssec": "^4",
     "passport": "^0"
   },
   "devDependencies": {
-    "@cap-js/sqlite": "^2.4",
     "@cap-js/cds-test": "^1",
-    "@sap/cds-dk": "^10"
+    "@sap/cds-dk": "^10.0.3"
   },
   "scripts": {
     "start": "node node_modules/@sap/cds/bin/serve.js all --production",
@@ -21,15 +21,33 @@
     "requires": {
       "db": {
         "kind": "sqlite",
-        "credentials": { "url": ":memory:" },
+        "credentials": {
+          "url": ":memory:"
+        },
         "[production]": {
-          "kind": "hana"
+          "kind": "sqlite",
+          "credentials": {
+            "url": "db.sqlite"
+          }
         }
       },
       "auth": {
         "kind": "dummy",
         "[production]": {
           "kind": "xsuaa"
+        }
+      },
+      "S4HANA": {
+        "kind": "odata-v4",
+        "credentials": {
+          "destination": "S4HANA_PUBLIC_CLOUD",
+          "requestTimeout": 30000
+        },
+        "[production]": {
+          "credentials": {
+            "destination": "S4HANA_PUBLIC_CLOUD",
+            "requestTimeout": 30000
+          }
         }
       }
     }

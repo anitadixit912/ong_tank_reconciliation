@@ -1,61 +1,25 @@
 <?xml version="1.0" encoding="utf-8"?>
 <testsuites>
-	<testcase name="triggerRun: creates run and M1 audit log" time="0.394610" classname="test" file="/home/user/project/assets/tank-reconciliation-cap/test/reconciliation-service.test.js" failure="failed running before hook">
-		<failure type="hookFailed" message="failed running before hook">
-[Error [ERR_TEST_FAILURE]: failed running before hook] { code: 'ERR_TEST_FAILURE', failureType: 'hookFailed', cause: { code: 'SQLITE_ERROR', query: "INSERT INTO tank_reconciliation_TankConfiguration (tankId,tankName,materialId,plant,toleranceOkPct,toleranceFlagPct,atgEndpoint,active,terminalId,terminalName) SELECT value->>'$[0]',value->>'$[1]',value->>'$[2]',value->>'$[3]',value->>'$[4]',value->>'$[5]',value->>'$[6]',value->>'$[7]',value->>'$[8]',value->>'$[9]' FROM json_each(?)" } }
-		</failure>
-	</testcase>
-	<testcase name="triggerRun: rejects missing runDate" time="0.000591" classname="test" file="/home/user/project/assets/tank-reconciliation-cap/test/reconciliation-service.test.js" failure="failed running before hook">
-		<failure type="hookFailed" message="failed running before hook">
-[Error [ERR_TEST_FAILURE]: failed running before hook] { code: 'ERR_TEST_FAILURE', failureType: 'hookFailed', cause: { code: 'SQLITE_ERROR', query: "INSERT INTO tank_reconciliation_TankConfiguration (tankId,tankName,materialId,plant,toleranceOkPct,toleranceFlagPct,atgEndpoint,active,terminalId,terminalName) SELECT value->>'$[0]',value->>'$[1]',value->>'$[2]',value->>'$[3]',value->>'$[4]',value->>'$[5]',value->>'$[6]',value->>'$[7]',value->>'$[8]',value->>'$[9]' FROM json_each(?)" } }
-		</failure>
-	</testcase>
-	<testcase name="triggerRun: rejects duplicate run for same date" time="0.000159" classname="test" file="/home/user/project/assets/tank-reconciliation-cap/test/reconciliation-service.test.js" failure="failed running before hook">
-		<failure type="hookFailed" message="failed running before hook">
-[Error [ERR_TEST_FAILURE]: failed running before hook] { code: 'ERR_TEST_FAILURE', failureType: 'hookFailed', cause: { code: 'SQLITE_ERROR', query: "INSERT INTO tank_reconciliation_TankConfiguration (tankId,tankName,materialId,plant,toleranceOkPct,toleranceFlagPct,atgEndpoint,active,terminalId,terminalName) SELECT value->>'$[0]',value->>'$[1]',value->>'$[2]',value->>'$[3]',value->>'$[4]',value->>'$[5]',value->>'$[6]',value->>'$[7]',value->>'$[8]',value->>'$[9]' FROM json_each(?)" } }
-		</failure>
-	</testcase>
-	<testcase name="approvePosting: creates approval record and M4 audit log" time="0.000087" classname="test" file="/home/user/project/assets/tank-reconciliation-cap/test/reconciliation-service.test.js" failure="failed running before hook">
-		<failure type="hookFailed" message="failed running before hook">
-[Error [ERR_TEST_FAILURE]: failed running before hook] { code: 'ERR_TEST_FAILURE', failureType: 'hookFailed', cause: { code: 'SQLITE_ERROR', query: "INSERT INTO tank_reconciliation_TankConfiguration (tankId,tankName,materialId,plant,toleranceOkPct,toleranceFlagPct,atgEndpoint,active,terminalId,terminalName) SELECT value->>'$[0]',value->>'$[1]',value->>'$[2]',value->>'$[3]',value->>'$[4]',value->>'$[5]',value->>'$[6]',value->>'$[7]',value->>'$[8]',value->>'$[9]' FROM json_each(?)" } }
-		</failure>
-	</testcase>
-	<testcase name="approvePosting: rejects missing tankResultId" time="0.000086" classname="test" file="/home/user/project/assets/tank-reconciliation-cap/test/reconciliation-service.test.js" failure="failed running before hook">
-		<failure type="hookFailed" message="failed running before hook">
-[Error [ERR_TEST_FAILURE]: failed running before hook] { code: 'ERR_TEST_FAILURE', failureType: 'hookFailed', cause: { code: 'SQLITE_ERROR', query: "INSERT INTO tank_reconciliation_TankConfiguration (tankId,tankName,materialId,plant,toleranceOkPct,toleranceFlagPct,atgEndpoint,active,terminalId,terminalName) SELECT value->>'$[0]',value->>'$[1]',value->>'$[2]',value->>'$[3]',value->>'$[4]',value->>'$[5]',value->>'$[6]',value->>'$[7]',value->>'$[8]',value->>'$[9]' FROM json_each(?)" } }
-		</failure>
-	</testcase>
-	<testcase name="approvePosting: rejects non-existent tank" time="0.000098" classname="test" file="/home/user/project/assets/tank-reconciliation-cap/test/reconciliation-service.test.js" failure="failed running before hook">
-		<failure type="hookFailed" message="failed running before hook">
-[Error [ERR_TEST_FAILURE]: failed running before hook] { code: 'ERR_TEST_FAILURE', failureType: 'hookFailed', cause: { code: 'SQLITE_ERROR', query: "INSERT INTO tank_reconciliation_TankConfiguration (tankId,tankName,materialId,plant,toleranceOkPct,toleranceFlagPct,atgEndpoint,active,terminalId,terminalName) SELECT value->>'$[0]',value->>'$[1]',value->>'$[2]',value->>'$[3]',value->>'$[4]',value->>'$[5]',value->>'$[6]',value->>'$[7]',value->>'$[8]',value->>'$[9]' FROM json_each(?)" } }
-		</failure>
-	</testcase>
-	<testcase name="approvePosting: rejects non-URGENT classification" time="0.000076" classname="test" file="/home/user/project/assets/tank-reconciliation-cap/test/reconciliation-service.test.js" failure="failed running before hook">
-		<failure type="hookFailed" message="failed running before hook">
-[Error [ERR_TEST_FAILURE]: failed running before hook] { code: 'ERR_TEST_FAILURE', failureType: 'hookFailed', cause: { code: 'SQLITE_ERROR', query: "INSERT INTO tank_reconciliation_TankConfiguration (tankId,tankName,materialId,plant,toleranceOkPct,toleranceFlagPct,atgEndpoint,active,terminalId,terminalName) SELECT value->>'$[0]',value->>'$[1]',value->>'$[2]',value->>'$[3]',value->>'$[4]',value->>'$[5]',value->>'$[6]',value->>'$[7]',value->>'$[8]',value->>'$[9]' FROM json_each(?)" } }
-		</failure>
-	</testcase>
-	<testcase name="rejectPosting: sets REJECTED status and stores reason" time="0.000074" classname="test" file="/home/user/project/assets/tank-reconciliation-cap/test/reconciliation-service.test.js" failure="failed running before hook">
-		<failure type="hookFailed" message="failed running before hook">
-[Error [ERR_TEST_FAILURE]: failed running before hook] { code: 'ERR_TEST_FAILURE', failureType: 'hookFailed', cause: { code: 'SQLITE_ERROR', query: "INSERT INTO tank_reconciliation_TankConfiguration (tankId,tankName,materialId,plant,toleranceOkPct,toleranceFlagPct,atgEndpoint,active,terminalId,terminalName) SELECT value->>'$[0]',value->>'$[1]',value->>'$[2]',value->>'$[3]',value->>'$[4]',value->>'$[5]',value->>'$[6]',value->>'$[7]',value->>'$[8]',value->>'$[9]' FROM json_each(?)" } }
-		</failure>
-	</testcase>
-	<testcase name="rejectPosting: rejects empty comment" time="0.000082" classname="test" file="/home/user/project/assets/tank-reconciliation-cap/test/reconciliation-service.test.js" failure="failed running before hook">
-		<failure type="hookFailed" message="failed running before hook">
-[Error [ERR_TEST_FAILURE]: failed running before hook] { code: 'ERR_TEST_FAILURE', failureType: 'hookFailed', cause: { code: 'SQLITE_ERROR', query: "INSERT INTO tank_reconciliation_TankConfiguration (tankId,tankName,materialId,plant,toleranceOkPct,toleranceFlagPct,atgEndpoint,active,terminalId,terminalName) SELECT value->>'$[0]',value->>'$[1]',value->>'$[2]',value->>'$[3]',value->>'$[4]',value->>'$[5]',value->>'$[6]',value->>'$[7]',value->>'$[8]',value->>'$[9]' FROM json_each(?)" } }
-		</failure>
-	</testcase>
-	<testcase name="rejectPosting: rejects missing comment" time="0.000079" classname="test" file="/home/user/project/assets/tank-reconciliation-cap/test/reconciliation-service.test.js" failure="failed running before hook">
-		<failure type="hookFailed" message="failed running before hook">
-[Error [ERR_TEST_FAILURE]: failed running before hook] { code: 'ERR_TEST_FAILURE', failureType: 'hookFailed', cause: { code: 'SQLITE_ERROR', query: "INSERT INTO tank_reconciliation_TankConfiguration (tankId,tankName,materialId,plant,toleranceOkPct,toleranceFlagPct,atgEndpoint,active,terminalId,terminalName) SELECT value->>'$[0]',value->>'$[1]',value->>'$[2]',value->>'$[3]',value->>'$[4]',value->>'$[5]',value->>'$[6]',value->>'$[7]',value->>'$[8]',value->>'$[9]' FROM json_each(?)" } }
-		</failure>
-	</testcase>
-	<!-- tests 10 -->
+	<testcase name="triggerRun: creates run and M1 audit log" time="0.428122" classname="test" file="/home/user/project/assets/tank-reconciliation-cap/test/reconciliation-service.test.js"/>
+	<testcase name="triggerRun: rejects missing runDate" time="0.000910" classname="test" file="/home/user/project/assets/tank-reconciliation-cap/test/reconciliation-service.test.js"/>
+	<testcase name="triggerRun: rejects duplicate run for same date" time="0.004051" classname="test" file="/home/user/project/assets/tank-reconciliation-cap/test/reconciliation-service.test.js"/>
+	<testcase name="approvePosting: creates approval record and M4 audit log" time="0.007805" classname="test" file="/home/user/project/assets/tank-reconciliation-cap/test/reconciliation-service.test.js"/>
+	<testcase name="approvePosting: rejects missing tankResultId" time="0.000515" classname="test" file="/home/user/project/assets/tank-reconciliation-cap/test/reconciliation-service.test.js"/>
+	<testcase name="approvePosting: rejects non-existent tank" time="0.001317" classname="test" file="/home/user/project/assets/tank-reconciliation-cap/test/reconciliation-service.test.js"/>
+	<testcase name="approvePosting: rejects non-URGENT classification" time="0.003105" classname="test" file="/home/user/project/assets/tank-reconciliation-cap/test/reconciliation-service.test.js"/>
+	<testcase name="rejectPosting: sets REJECTED status and stores reason" time="0.005916" classname="test" file="/home/user/project/assets/tank-reconciliation-cap/test/reconciliation-service.test.js"/>
+	<testcase name="rejectPosting: rejects empty comment" time="0.002260" classname="test" file="/home/user/project/assets/tank-reconciliation-cap/test/reconciliation-service.test.js"/>
+	<testcase name="rejectPosting: rejects missing comment" time="0.002364" classname="test" file="/home/user/project/assets/tank-reconciliation-cap/test/reconciliation-service.test.js"/>
+	<testcase name="retriggerDataCollection: resets FAILED run to PENDING and writes audit log" time="0.007491" classname="test" file="/home/user/project/assets/tank-reconciliation-cap/test/reconciliation-service.test.js"/>
+	<testcase name="retriggerDataCollection: rejects missing runId" time="0.000356" classname="test" file="/home/user/project/assets/tank-reconciliation-cap/test/reconciliation-service.test.js"/>
+	<testcase name="retriggerDataCollection: rejects non-existent run" time="0.000939" classname="test" file="/home/user/project/assets/tank-reconciliation-cap/test/reconciliation-service.test.js"/>
+	<testcase name="retriggerDataCollection: rejects run in non-FAILED/PENDING status" time="0.002009" classname="test" file="/home/user/project/assets/tank-reconciliation-cap/test/reconciliation-service.test.js"/>
+	<!-- tests 14 -->
 	<!-- suites 0 -->
-	<!-- pass 0 -->
-	<!-- fail 10 -->
+	<!-- pass 14 -->
+	<!-- fail 0 -->
 	<!-- cancelled 0 -->
 	<!-- skipped 0 -->
 	<!-- todo 0 -->
-	<!-- duration_ms 540.087688 -->
+	<!-- duration_ms 598.472571 -->
 </testsuites>

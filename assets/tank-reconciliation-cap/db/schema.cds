@@ -96,6 +96,7 @@ entity AuditLogEntry : cuid {
   outputSummary: String(1000);
 }
 
+// R13: Multi-terminal support — terminalId/terminalName scope each tank to a site
 entity TankConfiguration {
   key tankId         : String(20);
   tankName           : String(100)  @mandatory;
@@ -105,14 +106,14 @@ entity TankConfiguration {
   toleranceFlagPct   : Decimal(5,2) default 0.25;
   atgEndpoint        : String(500);
   active             : Boolean      default true;
-  // R13: Multi-terminal support — scope each tank to a named terminal site
   terminalId         : String(50)   default 'DEFAULT';
   terminalName       : String(100);
 }
 
-// R12: Variance trend view — 30-day delta history per tank (virtual/projection)
+// R12: Variance trend view — delta history per tank across completed runs
 view TankVarianceTrend as
   select from TankResult {
+    key ID,
     tankId,
     tankName,
     delta,

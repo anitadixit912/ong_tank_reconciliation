@@ -73,6 +73,25 @@ body {
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
+  position: relative;
+}
+.kpi-tile--clickable {
+  cursor: pointer;
+  transition: box-shadow 0.15s, transform 0.15s;
+}
+.kpi-tile--clickable:hover {
+  box-shadow: 0 4px 12px rgba(0,0,0,.15);
+  transform: translateY(-2px);
+}
+.kpi-tile--clickable:active {
+  transform: translateY(0);
+}
+.kpi-arrow {
+  position: absolute;
+  top: 0.75rem;
+  right: 0.9rem;
+  font-size: 1.1rem;
+  color: #adb5bd;
 }
 
 .kpi-label {

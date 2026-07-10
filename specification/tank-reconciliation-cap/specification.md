@@ -208,4 +208,20 @@ The following S/4HANA OData APIs are consumed by the n8n Reconciliation Agent. T
   - `GET /reconciliation/TankResults` returns seed data (15 rows ✓)
   - `GET /reconciliation/AuditLog` returns audit entries (16 rows ✓)
   - `GET /reconciliation/TankConfigurations` returns config (5 rows ✓)
-- [x] React dashboard Vite build completes successfully — 1881 modules, 0 errors
+- [x] React dashboard Vite build completes successfully — 1883 modules, 0 errors (includes TrendChart R12 page)
+
+## Requirements Coverage (R01–R13)
+
+- [x] **R01** Dual-Source Data Ingestion — n8n ATG + Fiori ingest nodes (Data Collector steps 2–5)
+- [x] **R02** VCF Correction — n8n VCF Calculator with ASTM fallback (steps 8–12)
+- [x] **R03** Per-Tank Variance Calculation and Classification — n8n Variance Engine (steps 13–16)
+- [x] **R04** Supervisor Approval Workflow — CAP `approvePosting`/`rejectPosting` actions + ApprovalQueue UI
+- [x] **R05** HPM Goods Movement Posting — n8n Material Document POST to S/4HANA (step 20)
+- [x] **R06** OK/FLAG/URGENT Alerting — n8n Alert Manager + BTP ANS (step 23)
+- [x] **R07** Per-Tank Variance PDF Report — n8n Report Generator + Email + MS Teams (steps 24–27)
+- [x] **R08** Unified CAP Dashboard — React UI with Dashboard, TankDetail, ApprovalQueue, AuditTrail, Configuration, TrendChart views
+- [x] **R09** Immutable Audit Log — `AuditLogEntry` entity; all handlers write M1–M6 milestone log entries
+- [x] **R10** Configurable Tolerance Thresholds per Tank — `TankConfiguration` with `toleranceOkPct`/`toleranceFlagPct`; admin CRUD UI
+- [x] **R11** Run Re-trigger on Data Completeness Failure — `retriggerDataCollection` action in CAP + "↺ Re-trigger" button on Dashboard for FAILED/PENDING runs; 4 new handler tests pass
+- [x] **R12** Trend Visualisation — Tank Variance History — `TankVarianceTrend` view in schema; `TrendChart.jsx` page with SVG sparklines, 30-day delta history per tank; `/trends` route in App
+- [x] **R13** Multi-Terminal Support — `terminalId`/`terminalName` fields on `TankConfiguration`; seed CSV updated with TERM-NORTH/TERM-SOUTH; Configuration UI shows terminal column; `fetchTerminals()` API helper

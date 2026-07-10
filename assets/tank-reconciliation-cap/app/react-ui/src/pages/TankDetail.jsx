@@ -30,8 +30,8 @@ export default function TankDetail() {
   if (error)   return <div className="error-banner">{error}</div>;
   if (!run)    return <div className="empty-state">Run not found.</div>;
 
-  const tanks = run.results || [];
-  const auditEntries = run.auditLog || [];
+  const tanks = run.tankResults || [];
+  const auditEntries = run.auditEntries || [];
 
   return (
     <div>

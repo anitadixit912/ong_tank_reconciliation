@@ -101,7 +101,8 @@ async def get_mcp_tools(user_token: str | None = None) -> list:
     try:
         from sap_cloud_sdk.agentgateway import create_client
         client = create_client()
-        mcp_tools = await client.list_mcp_tools(user_token=[REDACTED]        if not mcp_tools:
+        mcp_tools = await client.list_mcp_tools(user_token=user_token)
+        if not mcp_tools:
             logger.warning("Agent Gateway returned 0 tools")
             return []
         # Convert to LangChain tools (simplified)

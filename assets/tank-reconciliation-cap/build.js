@@ -79,8 +79,8 @@ if (COMPONENT_TYPE === 'srv') {
     console.log('\n=== Step 3b: Building React UI (Vite) ===');
     run('node_modules/.bin/vite build', { cwd: uiDir });
     const uiDist   = path.join(ROOT, 'app', 'dist');
-    const uiTarget = path.join(ROOT, 'gen', 'srv', 'app', 'dist');
-    console.log('\n=== Step 3c: Copying React UI dist -> gen/srv/app/dist ===');
+    const uiTarget = path.join(ROOT, 'gen', 'srv', 'app');
+    console.log('\n=== Step 3c: Copying React UI dist -> gen/srv/app (flat) ===');
     copyDir(uiDist, uiTarget);
   } else {
     console.log('\n=== Step 3: No React UI found — skipping ===');
@@ -116,6 +116,53 @@ if (COMPONENT_TYPE === 'srv') {
   const genSrvDir = path.join(ROOT, 'gen', 'srv');
   console.log('\n=== Step 6: npm install --production in gen/srv ===');
   run('npm install --omit=dev --cache /tmp/npm-cache --prefer-offline', { cwd: genSrvDir });
+
+  // Step 6b: Create + seed SQLite DB (production)
+  const dbFile = path.join(genSrvDir, 'db.sqlite');
+  const csnFile = path.join(genSrvDir, 'srv', 'csn.json');
+  if (fs.existsSync(csnFile)) {
+    console.log('\n=== Step 6b: Deploying schema to SQLite and seeding data ===');
+    // Use cds deploy to create schema
+    run(`node_modules/.bin/cds deploy ${csnFile} --to sqlite:${dbFile}`, { cwd: ROOT, env: { ...process.env, CDS_ENV: 'production' } });
+    // Seed from CSV data files using node/sqlite3 directly
+    const csvDir = path.join(ROOT, 'db', 'data');
+    if (fs.existsSync(csvDir)) {
+      const seedScript = `
+const sqlite3 = require('better-sqlite3');
+const fs = require('fs');
+const path = require('path');
+const db = new sqlite3('${dbFile}');
+const csvDir = '${csvDir}';
+const map = {
+  'tank.reconciliation-TankConfiguration.csv': 'tank_reconciliation_TankConfiguration',
+  'tank.reconciliation-ReconciliationRun.csv': 'tank_reconciliation_ReconciliationRun',
+  'tank.reconciliation-TankResult.csv': 'tank_reconciliation_TankResult',
+  'tank.reconciliation-AuditLogEntry.csv': 'tank_reconciliation_AuditLogEntry',
+};
+for (const [file, table] of Object.entries(map)) {
+  const p = path.join(csvDir, file);
+  if (!fs.existsSync(p)) { console.log('SKIP', file); continue; }
+  const lines = fs.readFileSync(p, 'utf8').split('\\n').filter(l => l.trim());
+  const headers = lines[0].split(',');
+  const cols = db.pragma('table_info(' + table + ')').map(c => c.name);
+  const useCols = headers.filter(h => cols.includes(h));
+  const stmt = db.prepare('INSERT OR REPLACE INTO ' + table + ' (' + useCols.map(c => '"' + c + '"').join(',') + ') VALUES (' + useCols.map(() => '?').join(',') + ')');
+  let n = 0;
+  for (let i = 1; i < lines.length; i++) {
+    const vals = lines[i].split(',');
+    const row = useCols.map((c, j) => { const v = vals[headers.indexOf(c)] || ''; return v === 'true' ? 1 : v === 'false' ? 0 : v === '' ? null : v; });
+    try { stmt.run(row); n++; } catch(e) { console.error('  Row', i, e.message); }
+  }
+  console.log('Seeded', table + ':', n, 'rows');
+}
+db.close();
+`;
+      fs.writeFileSync('/tmp/seed_db.js', seedScript);
+      run(`node /tmp/seed_db.js`, { cwd: genSrvDir });
+    }
+  } else {
+    console.log('   csn.json not found, skipping SQLite deploy');
+  }
 
   // Step 7: Copy gen/srv -> /outputs
   console.log('\n=== Step 7: Copying gen/srv -> ' + OUTPUTS_DIR + ' ===');

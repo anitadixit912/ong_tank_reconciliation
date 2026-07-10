@@ -4,6 +4,23 @@ const cds = require('@sap/cds');
 // Boot in-process server — must be called ONCE at top level before describe/it
 cds.test(__dirname + '/..');
 
+// ── Auth helper — run every test body inside a CDS transaction with a
+//    fully-authenticated mock user so @requires guards pass ──────────────────
+const TEST_USER = new cds.User({
+  id: 'test-user',
+  roles: ['authenticated-user', 'ReconciliationApprover', 'ReconciliationAdmin']
+});
+
+// Wrap each test function in cds.run(fn) with the test user set via cds._tx
+// CDS 9: use srv.tx({ user }) to scope the user to the async context
+function withTestUser(fn) {
+  return async function (...args) {
+    // Obtain the service once CDS is ready
+    const srv = await cds.connect.to('ReconciliationService');
+    return srv.tx({ user: TEST_USER }, async () => fn.apply(this, args));
+  };
+}
+
 // ── Seed helpers ─────────────────────────────────────────────────────────────
 
 async function db() { return cds.connect.to('db'); }
@@ -30,7 +47,7 @@ async function seedUrgentTank(runId) {
 
 // ── triggerRun ────────────────────────────────────────────────────────────────
 
-it('triggerRun: creates run and M1 audit log', async () => {
+it('triggerRun: creates run and M1 audit log', withTestUser(async () => {
   const srv = cds.services['ReconciliationService'];
   const d = await db();
 
@@ -46,22 +63,22 @@ it('triggerRun: creates run and M1 audit log', async () => {
     .where({ run_ID: result.runId, milestone: 'M1' }));
   expect(log).toBeTruthy();
   expect(log.outcome).toBe('ACHIEVED');
-});
+}));
 
-it('triggerRun: rejects missing runDate', async () => {
+it('triggerRun: rejects missing runDate', withTestUser(async () => {
   const srv = cds.services['ReconciliationService'];
   await expect(srv.send('triggerRun', {})).rejects.toThrow(/runDate/i);
-});
+}));
 
-it('triggerRun: rejects duplicate run for same date', async () => {
+it('triggerRun: rejects duplicate run for same date', withTestUser(async () => {
   const srv = cds.services['ReconciliationService'];
   await srv.send('triggerRun', { runDate: '2099-04-01' });
   await expect(srv.send('triggerRun', { runDate: '2099-04-01' })).rejects.toThrow(/already exists/i);
-});
+}));
 
 // ── approvePosting ─────────────────────────────────────────────────────────────
 
-it('approvePosting: creates approval record and M4 audit log', async () => {
+it('approvePosting: creates approval record and M4 audit log', withTestUser(async () => {
   const srv = cds.services['ReconciliationService'];
   const d = await db();
   const runId = await seedRun('2099-06-01', { status: 'AWAITING_APPROVAL' });
@@ -78,20 +95,20 @@ it('approvePosting: creates approval record and M4 audit log', async () => {
   const log = await d.run(SELECT.one.from('tank.reconciliation.AuditLogEntry')
     .where({ run_ID: runId, milestone: 'M4' }));
   expect(log.outcome).toBe('ACHIEVED');
-});
+}));
 
-it('approvePosting: rejects missing tankResultId', async () => {
+it('approvePosting: rejects missing tankResultId', withTestUser(async () => {
   const srv = cds.services['ReconciliationService'];
   await expect(srv.send('approvePosting', {})).rejects.toThrow(/tankResultId/i);
-});
+}));
 
-it('approvePosting: rejects non-existent tank', async () => {
+it('approvePosting: rejects non-existent tank', withTestUser(async () => {
   const srv = cds.services['ReconciliationService'];
   await expect(srv.send('approvePosting', { tankResultId: cds.utils.uuid() }))
     .rejects.toThrow(/not found/i);
-});
+}));
 
-it('approvePosting: rejects non-URGENT classification', async () => {
+it('approvePosting: rejects non-URGENT classification', withTestUser(async () => {
   const srv = cds.services['ReconciliationService'];
   const d = await db();
   const runId = await seedRun('2099-07-01');
@@ -100,11 +117,11 @@ it('approvePosting: rejects non-URGENT classification', async () => {
     ID: tankResultId, run_ID: runId, tankId: 'TK-OK', classification: 'OK', postingStatus: 'PENDING'
   }));
   await expect(srv.send('approvePosting', { tankResultId })).rejects.toThrow(/URGENT/i);
-});
+}));
 
 // ── rejectPosting ─────────────────────────────────────────────────────────────
 
-it('rejectPosting: sets REJECTED status and stores reason', async () => {
+it('rejectPosting: sets REJECTED status and stores reason', withTestUser(async () => {
   const srv = cds.services['ReconciliationService'];
   const d = await db();
   const runId = await seedRun('2099-08-01', { status: 'AWAITING_APPROVAL' });
@@ -120,25 +137,25 @@ it('rejectPosting: sets REJECTED status and stores reason', async () => {
   const approval = await d.run(SELECT.one.from('tank.reconciliation.ApprovalRecord')
     .where({ tankResult_ID: tankResultId }));
   expect(approval.decision).toBe('REJECTED');
-});
+}));
 
-it('rejectPosting: rejects empty comment', async () => {
+it('rejectPosting: rejects empty comment', withTestUser(async () => {
   const srv = cds.services['ReconciliationService'];
   const runId = await seedRun('2099-09-01', { status: 'AWAITING_APPROVAL' });
   const tankResultId = await seedUrgentTank(runId);
   await expect(srv.send('rejectPosting', { tankResultId, comment: '' })).rejects.toThrow(/mandatory/i);
-});
+}));
 
-it('rejectPosting: rejects missing comment', async () => {
+it('rejectPosting: rejects missing comment', withTestUser(async () => {
   const srv = cds.services['ReconciliationService'];
   const runId = await seedRun('2099-10-01', { status: 'AWAITING_APPROVAL' });
   const tankResultId = await seedUrgentTank(runId);
   await expect(srv.send('rejectPosting', { tankResultId })).rejects.toThrow(/mandatory/i);
-});
+}));
 
 // ── retriggerDataCollection (R11) ─────────────────────────────────────────────
 
-it('retriggerDataCollection: resets FAILED run to PENDING and writes audit log', async () => {
+it('retriggerDataCollection: resets FAILED run to PENDING and writes audit log', withTestUser(async () => {
   const srv = cds.services['ReconciliationService'];
   const d   = await db();
   const runId = await seedRun('2099-11-01', { status: 'FAILED' });
@@ -149,27 +166,27 @@ it('retriggerDataCollection: resets FAILED run to PENDING and writes audit log',
   const updated = await d.run(SELECT.one.from('tank.reconciliation.ReconciliationRun').where({ ID: runId }));
   expect(updated.status).toBe('PENDING');
 
-  const log = await d.run(SELECT.one.from('tank.reconciliation.AuditLogEntry')
+  const logs = await d.run(SELECT.from('tank.reconciliation.AuditLogEntry')
     .where({ run_ID: runId, step: 'INGEST' })
     .orderBy({ timestamp: 'desc' }));
-  expect(log).toBeTruthy();
-  expect(log.message).toMatch(/retrigger/i);
-});
+  expect(logs.length).toBeGreaterThan(0);
+  expect(logs[0].message).toMatch(/retrigger/i);
+}));
 
-it('retriggerDataCollection: rejects missing runId', async () => {
+it('retriggerDataCollection: rejects missing runId', withTestUser(async () => {
   const srv = cds.services['ReconciliationService'];
   await expect(srv.send('retriggerDataCollection', {})).rejects.toThrow(/runId/i);
-});
+}));
 
-it('retriggerDataCollection: rejects non-existent run', async () => {
+it('retriggerDataCollection: rejects non-existent run', withTestUser(async () => {
   const srv = cds.services['ReconciliationService'];
   await expect(srv.send('retriggerDataCollection', { runId: cds.utils.uuid() }))
     .rejects.toThrow(/not found/i);
-});
+}));
 
-it('retriggerDataCollection: rejects run in non-FAILED/PENDING status', async () => {
+it('retriggerDataCollection: rejects run in non-FAILED/PENDING status', withTestUser(async () => {
   const srv = cds.services['ReconciliationService'];
   const runId = await seedRun('2099-12-01', { status: 'COMPLETED' });
   await expect(srv.send('retriggerDataCollection', { runId }))
     .rejects.toThrow(/cannot be re-triggered/i);
-});
+}));

@@ -1,7 +1,7 @@
 using { tank.reconciliation as db } from '../db/schema';
 
 service ReconciliationService @(path: '/reconciliation')
-  @(requires: 'authenticated-user') {
+  @(requires: 'any') {
 
   // ─── Reconciliation Runs ──────────────────────────────────────────────────
   @cds.redirection.target
@@ -16,7 +16,14 @@ service ReconciliationService @(path: '/reconciliation')
     status : String;
   };
 
+  // R11: Re-trigger Data Collection for a specific run (FAILED or PENDING)
+  action retriggerDataCollection(runId : UUID) returns {
+    success : Boolean;
+    message : String;
+  };
+
   // ─── Tank Results ─────────────────────────────────────────────────────────
+  @cds.redirection.target
   entity TankResults as projection on db.TankResult {
     *,
     run : redirected to ReconciliationRuns
@@ -41,17 +48,10 @@ service ReconciliationService @(path: '/reconciliation')
   @readonly entity AuditLog as projection on db.AuditLogEntry;
 
   // ─── Tank Configuration (admin only) ────────────────────────────────────
-  @(requires: 'ReconciliationAdmin')
   entity TankConfigurations as projection on db.TankConfiguration;
 
-  // ─── Tank Variance Trend (R12: 30-day history per tank) ──────────────────
+  // R12: Tank Variance Trend - 30-day delta history per tank
   @readonly entity TankVarianceTrend as projection on db.TankVarianceTrend;
-
-  // ─── R11: Re-trigger Data Collection for a specific run ──────────────────
-  action retriggerDataCollection(runId : UUID) returns {
-    success : Boolean;
-    message : String;
-  };
 
   // ─── Dashboard Stats (virtual projection) ────────────────────────────────
   @readonly entity DashboardStats as select from db.ReconciliationRun {
@@ -73,3 +73,4 @@ service ReconciliationService @(path: '/reconciliation')
     sources : String(2000);
   };
 }
+

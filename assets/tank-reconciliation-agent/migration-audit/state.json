@@ -19,7 +19,15 @@
       "asset.yaml": "kept-cfignored",
       "solution.yaml": "kept-cfignored"
     },
-    "deployment": null
+    "deployment": {
+      "platform_job_id": "d6efa4fb-140b-442c-a99b-d074f536fee3",
+      "platform_deploy_index": 10,
+      "status": "running",
+      "triggered_at": "2026-07-08T05:00:55Z",
+      "cf_push_status": "running",
+      "notes": "cf push succeeded. Agent running at [REDACTED]. Smoke test: GET /.well-known/agent.json -> HTTP 200. Fixed: main.py JWT slice, mcp_tools.py list_mcp_tools call, agent_executor.py user_token + get_mcp_tools. aicore.py uses destination service (aicore destination). CAP: destination service added, S4HANA_PUBLIC_CLOUD wired, AI Core now resolves via aicore destination via VCAP."
+    },
+    "s4hana_destination_name": "S4HANA_PUBLIC_CLOUD"
   },
   "audit_trail": [
     {
@@ -75,6 +83,36 @@
       "phase": "5.5",
       "kind": "autonomous_decision",
       "value": "tests: skipped (no domain tools to refactor; prebuilt_tests pass by design)"
+    },
+    {
+      "ts": "2026-07-08T04:57:28.118786Z",
+      "phase": "4.6",
+      "kind": "user_answer",
+      "value": "s4hana_destination_name = S4HANA_PUBLIC_CLOUD (user confirmed)"
+    },
+    {
+      "ts": "2026-07-08T05:00:55Z",
+      "phase": "7",
+      "kind": "deployment",
+      "value": "platform deploy job d6efa4fb-140b-442c-a99b-d074f536fee3 (index 10) started \u2014 previous job 31198297 failed with context deadline exceeded"
+    },
+    {
+      "ts": "2026-07-08T05:28:21Z",
+      "phase": "7",
+      "kind": "deployment",
+      "value": "agent running: cf push complete, smoke test HTTP 200, droplet ee336b8c assigned"
+    },
+    {
+      "ts": "2026-07-08T05:28:21Z",
+      "phase": "7",
+      "kind": "smoke_test",
+      "value": "GET /.well-known/agent.json -> 200 OK, name=Tank Reconciliation Agent, version=1.0.0"
+    },
+    {
+      "ts": "2026-07-08T05:28:21Z",
+      "phase": "7",
+      "kind": "autonomous_decision",
+      "value": "aicore destination: aicore.py reads VCAP_SERVICES[destination] binding and resolves aicore destination at runtime"
     }
   ]
 }

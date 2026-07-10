@@ -16,5 +16,6 @@ applications:
       - proj-vector-destination-service
     env:
       AICORE_DESTINATION_NAME: aicore
+      S4HANA_DESTINATION_NAME: S4HANA_PUBLIC_CLOUD
       LOG_LEVEL: INFO
       AGENT_LLM_MODEL: gpt-4o

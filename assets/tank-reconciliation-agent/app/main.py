@@ -25,6 +25,9 @@ logger = logging.getLogger(__name__)
 HOST = os.environ.get("HOST", "0.0.0.0")
 PORT = int(os.environ.get("PORT", "5000"))
 
+# "bearer " is 7 characters; strip it to get the raw JWT
+_BEARER_PREFIX_LEN = len("bearer ")
+
 
 class JWTContextMiddleware(BaseHTTPMiddleware):
     """Middleware that extracts JWT token from Authorization header."""
@@ -33,7 +36,7 @@ class JWTContextMiddleware(BaseHTTPMiddleware):
         auth_header = request.headers.get("authorization", "")
         token = None
         if auth_header.lower().startswith("bearer "):
-            token = [REDACTED]]
+            token = auth_header[_BEARER_PREFIX_LEN:]
         set_user_token(token)
         try:
             response = await call_next(request)

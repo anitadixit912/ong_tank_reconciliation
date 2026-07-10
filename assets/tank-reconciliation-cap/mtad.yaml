@@ -1,0 +1,53 @@
+_schema-version: "3.1"
+ID: tank-reconciliation-cap
+description: Tank Stock Reconciliation CAP backend - HDI deployer + Node.js service
+version: 1.0.0
+modules:
+- name: tank-reconciliation-cap-db-deployer
+  type: com.sap.xs.hdi
+  path: tank-reconciliation-cap-db-deployer
+  requires:
+  - name: tank-reconciliation-hdi
+  parameters:
+    buildpack: nodejs_buildpack
+- name: tank-reconciliation-cap-srv
+  type: javascript.nodejs
+  path: tank-reconciliation-cap-srv
+  requires:
+  - name: tank-reconciliation-hdi
+  - name: tank-reconciliation-xsuaa
+  - name: tank-reconciliation-destination
+  provides:
+  - name: srv-api
+    properties:
+      srv-url: ${default-url}
+  parameters:
+    buildpack: nodejs_buildpack
+    disk-quota: 512M
+    memory: 256M
+resources:
+- name: tank-reconciliation-hdi
+  type: com.sap.xs.hdi-container
+  parameters:
+    service: hana
+    service-plan: hdi-shared
+  properties:
+    hdi-service-name: ${service-name}
+- name: tank-reconciliation-xsuaa
+  type: org.cloudfoundry.managed-service
+  parameters:
+    path: ./xs-security.json
+    service: xsuaa
+    service-plan: application
+- name: tank-reconciliation-destination
+  type: org.cloudfoundry.managed-service
+  parameters:
+    service: destination
+    service-plan: lite
+parameters:
+  enable-parallel-deployments: true
+build-parameters:
+  before-all:
+  - builder: custom
+    commands:
+    - npm run custom_build
