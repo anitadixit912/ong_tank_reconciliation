@@ -104,9 +104,17 @@ export async function fetchAuditLog(params) {
   return data.value || [];
 }
 
+// Plants (live from S/4HANA via getPlants action)
+export async function fetchPlants() {
+  var res = await action('getPlants', {});
+  return Array.isArray(res) ? res : (res && res.value ? res.value : []);
+}
+
 // Actions
-export async function triggerRun(runDate) {
-  return action('triggerRun', { runDate: runDate });
+export async function triggerRun(runDate, plant) {
+  var body = { runDate: runDate };
+  if (plant) body.plant = plant;
+  return action('triggerRun', body);
 }
 
 export async function approvePosting(tankResultId, comment) {

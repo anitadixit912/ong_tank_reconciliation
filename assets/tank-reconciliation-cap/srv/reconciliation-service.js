@@ -8,6 +8,7 @@ const AICORE_DESTINATION  = process.env.AICORE_DESTINATION_NAME || 'aicore';
 
 const S4_STOCK_PATH = '/sap/opu/odata/sap/API_MATERIAL_STOCK_SRV';
 const S4_PI_PATH    = '/sap/opu/odata/sap/API_PHYSICAL_INVENTORY_DOC_SRV';
+const S4_PLANT_PATH = '/sap/opu/odata/sap/API_PLANT_SRV';
 
 // ── S/4HANA Cloud helpers ─────────────────────────────────────────────────────
 
@@ -84,6 +85,36 @@ async function _fetchPhysicalInventory(materialId, plant) {
   } catch (err) {
     cds.log('s4').warn('Failed to fetch physical inventory: ' + err.message);
     return null;
+  }
+}
+
+/**
+ * Fetch plant list from API_PLANT_SRV.
+ * Returns array of { Plant, PlantName } or empty array on error.
+ */
+async function _fetchPlants() {
+  try {
+    const cfg     = await _resolveDestination(S4HANA_DESTINATION);
+    const baseUrl = (cfg.URL || cfg.url || '').replace(/\/$/, '');
+    if (!baseUrl) return [];
+
+    const authHeader = _basicAuthHeader(cfg);
+    const path = S4_PLANT_PATH
+      + '/A_Plant?$select=Plant,PlantName,CountryKey,CompanyCode&$top=500&$format=json';
+
+    const headers = { Accept: 'application/json' };
+    if (authHeader) headers['Authorization'] = authHeader;
+
+    const res = await _httpGet(baseUrl + path, headers);
+    if (res.status !== 200) {
+      cds.log('s4').warn('API_PLANT_SRV returned ' + res.status);
+      return [];
+    }
+    const payload = JSON.parse(res.body);
+    return (payload.d && payload.d.results) ? payload.d.results : [];
+  } catch (err) {
+    cds.log('s4').warn('Failed to fetch plants: ' + err.message);
+    return [];
   }
 }
 
@@ -340,6 +371,12 @@ module.exports = class ReconciliationService extends cds.ApplicationService {
       } catch (_err) {
         return { reply: _fallbackReply(message, latestRun, tankSummary), sources };
       }
+    });
+
+    // ── getPlants ────────────────────────────────────────────────────────────
+    this.on('getPlants', async (req) => {
+      const plants = await _fetchPlants();
+      return plants.map(p => ({ Plant: p.Plant, PlantName: p.PlantName || p.Plant }));
     });
 
     return super.init();

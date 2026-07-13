@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { fetchRuns, fetchPendingApprovals, triggerRun, retriggerDataCollection } from '../api.js';
+import { fetchRuns, fetchPendingApprovals, fetchPlants, triggerRun, retriggerDataCollection } from '../api.js';
 import StatusBadge from '../components/StatusBadge.jsx';
 import KpiTile from '../components/KpiTile.jsx';
 
@@ -10,14 +10,19 @@ function todayIso() {
 
 export default function Dashboard() {
   const navigate = useNavigate();
-  const [runs, setRuns] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const [runs, setRuns]               = useState([]);
+  const [loading, setLoading]         = useState(true);
+  const [error, setError]             = useState(null);
   const [triggerDate, setTriggerDate] = useState(todayIso());
-  const [triggering, setTriggering] = useState(false);
-  const [triggerMsg, setTriggerMsg] = useState(null);
+  const [triggering, setTriggering]   = useState(false);
+  const [triggerMsg, setTriggerMsg]   = useState(null);
   const [retriggering, setRetriggering] = useState(null);
   const [pendingUrgent, setPendingUrgent] = useState(0);
+
+  // Plant filter state
+  const [plants, setPlants]           = useState([]);
+  const [plantsLoading, setPlantsLoading] = useState(false);
+  const [selectedPlant, setSelectedPlant] = useState('');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -36,13 +41,27 @@ export default function Dashboard() {
     }
   }, []);
 
+  // Load plants from S/4HANA on mount
+  useEffect(() => {
+    setPlantsLoading(true);
+    fetchPlants()
+      .then(data => setPlants(data))
+      .catch(() => setPlants([]))
+      .finally(() => setPlantsLoading(false));
+  }, []);
+
   useEffect(() => { load(); }, [load]);
 
-  // KPIs
+  // KPIs — Total Runs always shows ALL plants regardless of filter
   const latest = runs[0];
-  const totalTanks      = latest?.tankCount ?? 0;
+  const totalTanks       = latest?.tankCount ?? 0;
   const awaitingApproval = runs.filter(r => r.status === 'AWAITING_APPROVAL').length;
-  const failedRuns      = runs.filter(r => r.status === 'FAILED').length;
+  const failedRuns       = runs.filter(r => r.status === 'FAILED').length;
+
+  // Filtered runs for table only
+  const filteredRuns = selectedPlant
+    ? runs.filter(r => r.plant === selectedPlant || !r.plant)
+    : runs;
 
   // R11: Re-trigger data collection for a FAILED or PENDING run
   async function handleRetrigger(runId, runDate) {
@@ -63,7 +82,7 @@ export default function Dashboard() {
     setTriggering(true);
     setTriggerMsg(null);
     try {
-      const result = await triggerRun(triggerDate);
+      const result = await triggerRun(triggerDate, selectedPlant || undefined);
       setTriggerMsg({ type: 'success', text: `Run ${result.runId?.slice(0, 8)}… triggered for ${triggerDate}` });
       await load();
     } catch (err) {
@@ -77,13 +96,33 @@ export default function Dashboard() {
     <div>
       <h1 className="page-title">Reconciliation Dashboard</h1>
 
-      {/* KPI tiles */}
+      {/* Plant filter */}
+      <div style={{ marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+        <label style={{ fontWeight: 500, fontSize: '0.9rem' }}>Plant:</label>
+        <select
+          className="input"
+          style={{ width: '220px' }}
+          value={selectedPlant}
+          onChange={e => setSelectedPlant(e.target.value)}
+          disabled={plantsLoading}
+        >
+          <option value="">All Plants</option>
+          {plants.map(p => (
+            <option key={p.Plant} value={p.Plant}>
+              {p.Plant}{p.PlantName ? ` – ${p.PlantName}` : ''}
+            </option>
+          ))}
+        </select>
+        {plantsLoading && <span style={{ fontSize: '0.82rem', color: '#666' }}>Loading plants…</span>}
+      </div>
+
+      {/* KPI tiles — Total Runs always all plants */}
       <div className="kpi-grid">
-        <KpiTile label="Total Runs"        value={runs.length}       onClick={() => navigate('/')} />
-        <KpiTile label="Latest Tanks"      value={totalTanks}        onClick={() => navigate('/configuration')} />
-        <KpiTile label="Urgent Variances"  value={pendingUrgent}     className={pendingUrgent > 0 ? 'urgent' : ''}  onClick={() => navigate('/approvals')} />
-        <KpiTile label="Awaiting Approval" value={awaitingApproval}  className={awaitingApproval > 0 ? 'flag' : ''} onClick={() => navigate('/approvals')} />
-        <KpiTile label="Failed Runs"       value={failedRuns}        className={failedRuns > 0 ? 'urgent' : ''}  onClick={() => navigate('/')} />
+        <KpiTile label="Total Runs"        value={runs.length}      onClick={() => navigate('/')} />
+        <KpiTile label="Latest Tanks"      value={totalTanks}       onClick={() => navigate('/configuration')} />
+        <KpiTile label="Urgent Variances"  value={pendingUrgent}    className={pendingUrgent > 0 ? 'urgent' : ''}  onClick={() => navigate('/approvals')} />
+        <KpiTile label="Awaiting Approval" value={awaitingApproval} className={awaitingApproval > 0 ? 'flag' : ''} onClick={() => navigate('/approvals')} />
+        <KpiTile label="Failed Runs"       value={failedRuns}       className={failedRuns > 0 ? 'urgent' : ''}  onClick={() => navigate('/')} />
       </div>
 
       {/* Trigger new run */}
@@ -104,7 +143,7 @@ export default function Dashboard() {
                 />
               </div>
               <button type="submit" className="btn btn-primary" disabled={triggering}>
-                {triggering ? 'Triggering…' : '⚡ Trigger Run'}
+                {triggering ? 'Triggering…' : `⚡ Trigger Run${selectedPlant ? ' (' + selectedPlant + ')' : ''}`}
               </button>
               <button type="button" className="btn btn-outline" onClick={load}>↻ Refresh</button>
             </div>
@@ -122,10 +161,17 @@ export default function Dashboard() {
       {error && <div className="error-banner">Failed to load runs: {error}</div>}
 
       <div className="card">
-        <div className="card-header">Recent Reconciliation Runs</div>
+        <div className="card-header">
+          Recent Reconciliation Runs
+          {selectedPlant && (
+            <span style={{ fontSize: '0.82rem', fontWeight: 400, marginLeft: '0.5rem', color: '#666' }}>
+              — filtered: {selectedPlant} ({filteredRuns.length} of {runs.length})
+            </span>
+          )}
+        </div>
         {loading ? (
           <div className="loading">Loading runs…</div>
-        ) : runs.length === 0 ? (
+        ) : filteredRuns.length === 0 ? (
           <div className="empty-state">No reconciliation runs found. Trigger your first run above.</div>
         ) : (
           <table className="data-table">
@@ -141,7 +187,7 @@ export default function Dashboard() {
               </tr>
             </thead>
             <tbody>
-              {runs.map(run => (
+              {filteredRuns.map(run => (
                 <tr
                   key={run.ID}
                   onClick={() => navigate(`/runs/${run.ID}`)}
@@ -162,7 +208,6 @@ export default function Dashboard() {
                       onClick={e => { e.stopPropagation(); navigate(`/runs/${run.ID}`); }}>
                       View
                     </button>
-                    {/* R11: Re-trigger only for FAILED or PENDING runs */}
                     {(run.status === 'FAILED' || run.status === 'PENDING') && (
                       <button
                         className="btn btn-secondary"

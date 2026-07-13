@@ -72,5 +72,11 @@ service ReconciliationService @(path: '/reconciliation')
     reply   : String(5000);
     sources : String(2000);
   };
+
+  // ─── Plant Value Help (live from S/4HANA) ────────────────────────────────
+  action getPlants() returns array of {
+    Plant     : String(4);
+    PlantName : String(40);
+  };
 }
 

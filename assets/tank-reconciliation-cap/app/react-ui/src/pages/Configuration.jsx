@@ -1,5 +1,110 @@
-import React, { useEffect, useState, useCallback } from 'react';
-import { fetchTankConfigurations, updateTankConfiguration } from '../api.js';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
+import { fetchTankConfigurations, updateTankConfiguration, fetchPlants } from '../api.js';
+
+// ── PlantPicker: searchable live dropdown from S/4HANA ─────────────────────
+function PlantPicker({ value, onChange }) {
+  const [open, setOpen]       = useState(false);
+  const [plants, setPlants]   = useState([]);
+  const [search, setSearch]   = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError]     = useState(null);
+  const ref = useRef(null);
+
+  async function openPicker() {
+    if (!open) {
+      setOpen(true);
+      if (!plants.length) {
+        setLoading(true);
+        setError(null);
+        try {
+          const data = await fetchPlants();
+          setPlants(data);
+        } catch (e) {
+          setError('Could not load plants from S/4HANA');
+        } finally {
+          setLoading(false);
+        }
+      }
+    } else {
+      setOpen(false);
+    }
+  }
+
+  // Close on outside click
+  useEffect(() => {
+    function handle(e) { if (ref.current && !ref.current.contains(e.target)) setOpen(false); }
+    document.addEventListener('mousedown', handle);
+    return () => document.removeEventListener('mousedown', handle);
+  }, []);
+
+  const filtered = plants.filter(p =>
+    !search || p.Plant.toLowerCase().includes(search.toLowerCase()) ||
+    (p.PlantName || '').toLowerCase().includes(search.toLowerCase())
+  );
+
+  return (
+    <div ref={ref} style={{ position: 'relative', display: 'inline-block' }}>
+      <div style={{ display: 'flex', gap: '0.25rem', alignItems: 'center' }}>
+        <input
+          className="input"
+          style={{ width: '80px' }}
+          value={value || ''}
+          onChange={e => onChange(e.target.value)}
+          placeholder="Plant"
+        />
+        <button
+          type="button"
+          className="btn btn-outline"
+          style={{ fontSize: '0.75rem', padding: '0.25rem 0.4rem' }}
+          title="Browse plants from S/4HANA"
+          onClick={openPicker}
+        >⊞</button>
+      </div>
+      {open && (
+        <div style={{
+          position: 'absolute', top: '100%', left: 0, zIndex: 1000,
+          background: '#fff', border: '1px solid #ccc', borderRadius: '0.375rem',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.15)', minWidth: '260px', maxHeight: '280px',
+          overflow: 'hidden', display: 'flex', flexDirection: 'column'
+        }}>
+          <div style={{ padding: '0.5rem', borderBottom: '1px solid #eee' }}>
+            <input
+              className="input"
+              style={{ width: '100%', fontSize: '0.85rem' }}
+              autoFocus
+              placeholder="Search plants…"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+            />
+          </div>
+          <div style={{ overflowY: 'auto', flex: 1 }}>
+            {loading && <div style={{ padding: '0.75rem', color: '#666', fontSize: '0.85rem' }}>Loading plants…</div>}
+            {error   && <div style={{ padding: '0.75rem', color: '#dc3545', fontSize: '0.85rem' }}>{error}</div>}
+            {!loading && !error && filtered.length === 0 && (
+              <div style={{ padding: '0.75rem', color: '#999', fontSize: '0.85rem' }}>No plants found</div>
+            )}
+            {filtered.map(p => (
+              <div
+                key={p.Plant}
+                style={{
+                  padding: '0.5rem 0.75rem', cursor: 'pointer', fontSize: '0.85rem',
+                  background: value === p.Plant ? '#e8f4ff' : 'transparent',
+                  borderBottom: '1px solid #f5f5f5'
+                }}
+                onMouseEnter={e => e.currentTarget.style.background = '#f0f8ff'}
+                onMouseLeave={e => e.currentTarget.style.background = value === p.Plant ? '#e8f4ff' : 'transparent'}
+                onClick={() => { onChange(p.Plant); setOpen(false); setSearch(''); }}
+              >
+                <strong>{p.Plant}</strong>
+                {p.PlantName ? <span style={{ color: '#666', marginLeft: '0.5rem' }}>{p.PlantName}</span> : null}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function Configuration() {
   const [configs, setConfigs]   = useState([]);
@@ -118,8 +223,7 @@ export default function Configuration() {
                       value={draft.materialId || ''} onChange={e => set('materialId', e.target.value)} />
                   </td>
                   <td>
-                    <input className="input" style={{ width: '70px' }}
-                      value={draft.plant || ''} onChange={e => set('plant', e.target.value)} />
+                    <PlantPicker value={draft.plant || ''} onChange={v => set('plant', v)} />
                   </td>
                   <td>
                     <input className="input" type="number" step="0.01" style={{ width: '70px' }}
