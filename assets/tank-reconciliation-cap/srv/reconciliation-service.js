@@ -8,7 +8,7 @@ const AICORE_DESTINATION  = process.env.AICORE_DESTINATION_NAME || 'aicore';
 
 const S4_STOCK_PATH = '/sap/opu/odata/sap/API_MATERIAL_STOCK_SRV';
 const S4_PI_PATH    = '/sap/opu/odata/sap/API_PHYSICAL_INVENTORY_DOC_SRV';
-const S4_PLANT_PATH = '/sap/opu/odata/sap/API_PLANT_SRV';
+const S4_PLANT_PATH = '/sap/opu/odata/sap/ZTANK_PLANT_SRV_SRV';
 
 // ── S/4HANA Cloud helpers ─────────────────────────────────────────────────────
 
@@ -38,7 +38,8 @@ async function _fetchBookStock(materialId, plant) {
     const headers = { Accept: 'application/json' };
     if (authHeader) headers['Authorization'] = authHeader;
 
-    const res = await _httpGet(baseUrl + path, headers);
+    const proxyOpts = cfg._proxyHost ? { host: cfg._proxyHost, port: cfg._proxyPort, token: cfg._proxyToken } : null;
+    const res = await _httpGet(baseUrl + path, headers, proxyOpts);
     if (res.status !== 200) {
       cds.log('s4').warn('Material stock API returned ' + res.status + ' for ' + materialId + '/' + plant);
       return null;
@@ -100,14 +101,15 @@ async function _fetchPlants() {
 
     const authHeader = _basicAuthHeader(cfg);
     const path = S4_PLANT_PATH
-      + '/A_Plant?$select=Plant,PlantName,CountryKey,CompanyCode&$top=500&$format=json';
+      + '/PlantsSet?$select=Plant,Plantname&$top=500&$format=json';
 
     const headers = { Accept: 'application/json' };
     if (authHeader) headers['Authorization'] = authHeader;
 
-    const res = await _httpGet(baseUrl + path, headers);
+    const proxyOpts = cfg._proxyHost ? { host: cfg._proxyHost, port: cfg._proxyPort, token: cfg._proxyToken } : null;
+    const res = await _httpGet(baseUrl + path, headers, proxyOpts);
     if (res.status !== 200) {
-      cds.log('s4').warn('API_PLANT_SRV returned ' + res.status);
+      cds.log('s4').warn('ZTANK_PLANT_SRV_SRV returned ' + res.status);
       return [];
     }
     const payload = JSON.parse(res.body);
@@ -376,7 +378,7 @@ module.exports = class ReconciliationService extends cds.ApplicationService {
     // ── getPlants ────────────────────────────────────────────────────────────
     this.on('getPlants', async (req) => {
       const plants = await _fetchPlants();
-      return plants.map(p => ({ Plant: p.Plant, PlantName: p.PlantName || p.Plant }));
+      return plants.map(p => ({ Plant: p.Plant, PlantName: p.Plantname || p.PlantName || p.Plant }));
     });
 
     return super.init();
@@ -396,7 +398,20 @@ async function _resolveDestination(destName) {
   const res = await _httpGet(destUrl, { Authorization: 'Bearer ' + svcToken, Accept: 'application/json' });
   if (res.status >= 400) throw new Error('Destination service ' + res.status + ' for ' + destName + ': ' + res.body);
   const payload = JSON.parse(res.body);
-  return payload.destinationConfiguration || {};
+  const cfg = payload.destinationConfiguration || {};
+
+  // For OnPremise destinations, attach connectivity proxy info
+  if (cfg.ProxyType === 'OnPremise' || cfg.proxyType === 'OnPremise') {
+    const connBinding = (vcap['connectivity'] || [])[0];
+    if (connBinding) {
+      const cc = connBinding.credentials;
+      const proxyToken = await _fetchOAuthTokenHttp(cc.token_service_url || cc.url, cc.clientid, cc.clientsecret);
+      cfg._proxyHost  = cc.onpremise_proxy_host || 'connectivity.cf.us10.hana.ondemand.com';
+      cfg._proxyPort  = parseInt(cc.onpremise_proxy_port || '20003');
+      cfg._proxyToken = proxyToken;
+    }
+  }
+  return cfg;
 }
 
 // ── AI Core integration ───────────────────────────────────────────────────────
@@ -481,19 +496,31 @@ async function _fetchOAuthTokenHttp(tokenUrl, clientId, clientSecret) {
   });
 }
 
-async function _httpGet(url, headers) {
+async function _httpGet(url, headers, proxyOpts) {
   const https = require('https');
   const http  = require('http');
   return new Promise((resolve, reject) => {
     const u    = new URL(url);
-    const lib  = u.protocol === 'https:' ? https : http;
-    const opts = {
-      hostname: u.hostname,
-      port:     u.port || (u.protocol === 'https:' ? 443 : 80),
-      path:     u.pathname + u.search,
-      method:   'GET',
-      headers
-    };
+    let opts;
+    if (proxyOpts && proxyOpts.host) {
+      // Route through connectivity proxy for OnPremise destinations
+      opts = {
+        hostname: proxyOpts.host,
+        port:     proxyOpts.port || 20003,
+        path:     url,
+        method:   'GET',
+        headers:  { ...headers, 'Proxy-Authorization': 'Bearer ' + proxyOpts.token }
+      };
+    } else {
+      opts = {
+        hostname: u.hostname,
+        port:     u.port || (u.protocol === 'https:' ? 443 : 80),
+        path:     u.pathname + u.search,
+        method:   'GET',
+        headers
+      };
+    }
+    const lib = (proxyOpts && proxyOpts.host) ? http : (u.protocol === 'https:' ? https : http);
     const req = lib.request(opts, (res) => {
       let body = '';
       res.on('data', c => { body += c; });

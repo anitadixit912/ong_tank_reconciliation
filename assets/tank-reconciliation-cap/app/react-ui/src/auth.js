@@ -10,6 +10,13 @@ export async function fetchCurrentUser() {
   if (_userCache) return _userCache;
   try {
     const res = await fetch('/reconciliation/$metadata', { headers: { Accept: 'application/json' } });
+
+    // If 401, redirect to XSUAA login via CAP's built-in login endpoint
+    if (res.status === 401) {
+      window.location.href = '/login';
+      return null;
+    }
+
     // Try CAP's built-in user endpoint
     const meRes = await fetch('/user-api/currentUser', { headers: { Accept: 'application/json' } });
     if (meRes.ok) {

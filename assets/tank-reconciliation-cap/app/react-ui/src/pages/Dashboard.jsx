@@ -24,6 +24,8 @@ export default function Dashboard() {
   const [plantsLoading, setPlantsLoading] = useState(false);
   const [selectedPlant, setSelectedPlant] = useState('');
 
+  const [lastUpdated, setLastUpdated] = useState(null);
+
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -34,6 +36,7 @@ export default function Dashboard() {
       ]);
       setRuns(data);
       setPendingUrgent(pending.length);
+      setLastUpdated(new Date());
     } catch (e) {
       setError(e.message);
     } finally {
@@ -95,6 +98,11 @@ export default function Dashboard() {
   return (
     <div>
       <h1 className="page-title">Reconciliation Dashboard</h1>
+      {lastUpdated && (
+        <div style={{ fontSize: '0.8rem', color: '#666', marginBottom: '0.5rem' }}>
+          Last updated: {lastUpdated.toLocaleString()}
+        </div>
+      )}
 
       {/* Plant filter */}
       <div style={{ marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>

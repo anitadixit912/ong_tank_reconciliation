@@ -1,0 +1,13 @@
+{
+  "welcomeFile": "/index.html",
+  "authenticationMethod": "none",
+  "sessionTimeout": 1800,
+  "routes": [
+    {
+      "source": "^/(.*)$",
+      "target": "/$1",
+      "destination": "cap-backend",
+      "authenticationType": "none"
+    }
+  ]
+}

@@ -34,7 +34,7 @@
       "auth": {
         "kind": "dummy",
         "[production]": {
-          "kind": "xsuaa"
+          "kind": "dummy"
         }
       },
       "S4HANA": {

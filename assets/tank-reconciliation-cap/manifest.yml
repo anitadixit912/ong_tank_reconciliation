@@ -14,8 +14,26 @@ applications:
     services:
       - tank-reconciliation-xsuaa
       - tank-reconciliation-destination
+      - proj-vector-connectivity-service
     env:
       NODE_ENV: production
       CDS_ENV: production
       S4HANA_DESTINATION_NAME: OGS_S4
       AICORE_DESTINATION_NAME: aicore
+
+  - name: tank-reconciliation-approuter
+    path: approuter
+    memory: 128M
+    disk_quota: 256M
+    instances: 1
+    random-route: true
+    buildpacks:
+      - nodejs_buildpack
+    health-check-type: process
+    timeout: 120
+    services:
+      - tank-reconciliation-xsuaa
+    env:
+      destinations: >
+        [{"name":"cap-backend","url":"https://tank-reconciliation-cap-srv-patient-leopard-kw.cfapps.us10.hana.ondemand.com","forwardAuthToken":true}]
+      UAA_SERVICE_NAME: tank-reconciliation-xsuaa
