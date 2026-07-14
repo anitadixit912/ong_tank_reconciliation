@@ -1,13 +1,11 @@
 ---
-# Cloud Foundry deployment manifest for the Tank Reconciliation CAP backend.
-# Uses SQLite (in-memory) for this CF space — no HANA HDI service available.
-# Deployed via: cf push (from assets/tank-reconciliation-cap/)
 applications:
   - name: tank-reconciliation-cap-srv
     path: gen/srv
     memory: 256M
     disk_quota: 1G
     instances: 1
+    random-route: true
     buildpacks:
       - nodejs_buildpack
     command: node node_modules/@sap/cds/bin/serve.js all --production
@@ -19,5 +17,5 @@ applications:
     env:
       NODE_ENV: production
       CDS_ENV: production
-      S4HANA_DESTINATION_NAME: S4HANA_PUBLIC_CLOUD
+      S4HANA_DESTINATION_NAME: OGS_S4
       AICORE_DESTINATION_NAME: aicore

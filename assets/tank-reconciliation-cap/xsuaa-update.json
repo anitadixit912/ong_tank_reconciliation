@@ -1,0 +1,10 @@
+{
+  "xsappname": "na-dedc4f77-e7d7-4956-99a6-2bbfbc40a342",
+  "tenant-mode": "shared",
+  "authorities": [
+    "$XSAPPNAME.OGSIntegration",
+    "$XSAPPNAME.ReconciliationAdmin",
+    "$XSAPPNAME.ReconciliationApprover",
+    "$XSAPPNAME.ReconciliationUser"
+  ]
+}

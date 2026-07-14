@@ -1,6 +1,3 @@
 tankId,tankName,materialId,plant,toleranceOkPct,toleranceFlagPct,atgEndpoint,active,terminalId,terminalName
-TK-001,Crude Oil Tank A,MAT-CRUDE-01,TERM,0.10,0.25,https://atg-system.example.com/api/readings/TK-001,true,TERM-NORTH,North Terminal
-TK-002,Crude Oil Tank B,MAT-CRUDE-01,TERM,0.10,0.25,https://atg-system.example.com/api/readings/TK-002,true,TERM-NORTH,North Terminal
-TK-003,Diesel Storage Tank,MAT-DIESEL-02,TERM,0.08,0.20,https://atg-system.example.com/api/readings/TK-003,true,TERM-NORTH,North Terminal
-TK-004,Jet Fuel Tank,MAT-JET-03,TERM,0.05,0.15,https://atg-system.example.com/api/readings/TK-004,true,TERM-SOUTH,South Terminal
-TK-005,Fuel Oil Reserve,MAT-FOIL-04,TERM,0.12,0.30,https://atg-system.example.com/api/readings/TK-005,true,TERM-SOUTH,South Terminal
+USMOB-17T1,Diesel Tank,BLK_DIESEL,1743,0.08,0.20,https://atg-system.example.com/api/readings/USMOB-17T1,true,TERM-1743,Terminal 1743
+USMOB-17T2,C3 Propane Tank,BLK_GASOLINE 87,1743,0.10,0.25,https://atg-system.example.com/api/readings/USMOB-17T2,true,TERM-1743,Terminal 1743

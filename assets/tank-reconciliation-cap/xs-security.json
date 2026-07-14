@@ -1,6 +1,6 @@
 {
-  "xsappname": "tank-reconciliation-cap",
-  "tenant-mode": "dedicated",
+  "xsappname": "na-dedc4f77-e7d7-4956-99a6-2bbfbc40a342",
+  "tenant-mode": "shared",
   "description": "Tank Stock Reconciliation — security descriptor",
   "scopes": [
     {
@@ -67,5 +67,10 @@
       "name": "TankRecon_Admin",
       "role-template-references": ["$XSAPPNAME.ReconciliationAdmin"]
     }
-  ]
+  ],
+  "oauth2-configuration": {
+    "grant-types": ["client_credentials", "authorization_code", "password"],
+    "token-validity": 43200,
+    "redirect-uris": ["https://*.cfapps.us10.hana.ondemand.com/**"]
+  }
 }

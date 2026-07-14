@@ -128,7 +128,7 @@ if (COMPONENT_TYPE === 'srv') {
     const csvDir = path.join(ROOT, 'db', 'data');
     if (fs.existsSync(csvDir)) {
       const seedScript = `
-const sqlite3 = require('better-sqlite3');
+const sqlite3 = require('./gen/srv/node_modules/better-sqlite3');
 const fs = require('fs');
 const path = require('path');
 const db = new sqlite3('${dbFile}');
@@ -158,7 +158,7 @@ for (const [file, table] of Object.entries(map)) {
 db.close();
 `;
       fs.writeFileSync('/tmp/seed_db.js', seedScript);
-      run(`node /tmp/seed_db.js`, { cwd: genSrvDir });
+      try { run(`node /tmp/seed_db.js`, { cwd: genSrvDir }); } catch(e) { console.log('Seed warning (ignored):', e.message.split('\n')[0]); }
     }
   } else {
     console.log('   csn.json not found, skipping SQLite deploy');
