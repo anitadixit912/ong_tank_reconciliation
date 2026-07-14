@@ -38,7 +38,7 @@ async function _fetchBookStock(materialId, plant) {
     const headers = { Accept: 'application/json' };
     if (authHeader) headers['Authorization'] = authHeader;
 
-    const proxyOpts = cfg._proxyHost ? { host: cfg._proxyHost, port: cfg._proxyPort, token: cfg._proxyToken } : null;
+    const proxyOpts = cfg._proxyHost ? { host: cfg._proxyHost, port: cfg._proxyPort, token: cfg._proxyToken, locationId: cfg._locationId } : null;
     const res = await _httpGet(baseUrl + path, headers, proxyOpts);
     if (res.status !== 200) {
       cds.log('s4').warn('Material stock API returned ' + res.status + ' for ' + materialId + '/' + plant);
@@ -99,6 +99,8 @@ async function _fetchPlants() {
     const baseUrl = (cfg.URL || cfg.url || '').replace(/\/$/, '');
     if (!baseUrl) return [];
 
+    cds.log('s4').info('_fetchPlants: baseUrl=' + baseUrl + ' proxyHost=' + (cfg._proxyHost || 'none') + ' proxyType=' + (cfg.ProxyType || cfg.proxyType || 'none') + ' locationId=' + (cfg._locationId || 'none'));
+
     const authHeader = _basicAuthHeader(cfg);
     const path = S4_PLANT_PATH
       + '/PlantsSet?$select=Plant,Plantname&$top=500&$format=json';
@@ -106,10 +108,12 @@ async function _fetchPlants() {
     const headers = { Accept: 'application/json' };
     if (authHeader) headers['Authorization'] = authHeader;
 
-    const proxyOpts = cfg._proxyHost ? { host: cfg._proxyHost, port: cfg._proxyPort, token: cfg._proxyToken } : null;
-    const res = await _httpGet(baseUrl + path, headers, proxyOpts);
+    const proxyOpts = cfg._proxyHost ? { host: cfg._proxyHost, port: cfg._proxyPort, token: cfg._proxyToken, locationId: cfg._locationId } : null;
+    const fullUrl = baseUrl + path;
+    cds.log('s4').info('_fetchPlants calling: ' + fullUrl + (proxyOpts ? ' via proxy ' + proxyOpts.host + ':' + proxyOpts.port : ''));
+    const res = await _httpGet(fullUrl, headers, proxyOpts);
     if (res.status !== 200) {
-      cds.log('s4').warn('ZTANK_PLANT_SRV_SRV returned ' + res.status);
+      cds.log('s4').warn('ZTANK_PLANT_SRV_SRV returned ' + res.status + ' body=' + res.body.slice(0, 200));
       return [];
     }
     const payload = JSON.parse(res.body);
@@ -406,9 +410,10 @@ async function _resolveDestination(destName) {
     if (connBinding) {
       const cc = connBinding.credentials;
       const proxyToken = await _fetchOAuthTokenHttp(cc.token_service_url || cc.url, cc.clientid, cc.clientsecret);
-      cfg._proxyHost  = cc.onpremise_proxy_host || 'connectivity.cf.us10.hana.ondemand.com';
-      cfg._proxyPort  = parseInt(cc.onpremise_proxy_port || '20003');
-      cfg._proxyToken = proxyToken;
+      cfg._proxyHost   = cc.onpremise_proxy_host || 'connectivityproxy.internal.cf.us10.hana.ondemand.com';
+      cfg._proxyPort   = parseInt(cc.onpremise_proxy_http_port || cc.onpremise_proxy_port || '20003');
+      cfg._proxyToken  = proxyToken;
+      cfg._locationId  = cfg.CloudConnectorLocationId || cfg['sap-connectivity-scc-location_id'] || 'APAC_DEV10';
     }
   }
   return cfg;
@@ -509,7 +514,11 @@ async function _httpGet(url, headers, proxyOpts) {
         port:     proxyOpts.port || 20003,
         path:     url,
         method:   'GET',
-        headers:  { ...headers, 'Proxy-Authorization': 'Bearer ' + proxyOpts.token }
+        headers:  {
+          ...headers,
+          'Proxy-Authorization': 'Bearer ' + proxyOpts.token,
+          'SAP-Connectivity-SCC-Location_ID': proxyOpts.locationId || ''
+        }
       };
     } else {
       opts = {
