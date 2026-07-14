@@ -1,7 +1,8 @@
 using { tank.reconciliation as db } from '../db/schema';
 
+// Human users: ReconciliationUser / Approver / Admin  |  OGS machine: OGSIntegration
 service ReconciliationService @(path: '/reconciliation')
-  @(requires: 'any') {
+  @(requires: ['ReconciliationUser', 'ReconciliationApprover', 'ReconciliationAdmin', 'OGSIntegration']) {
 
   // ─── Reconciliation Runs ──────────────────────────────────────────────────
   @cds.redirection.target
@@ -11,12 +12,14 @@ service ReconciliationService @(path: '/reconciliation')
     auditEntries : redirected to AuditLog
   };
 
+  @(requires: ['ReconciliationAdmin', 'OGSIntegration'])
   action triggerRun(runDate : Date) returns {
     runId  : UUID;
     status : String;
   };
 
   // R11: Re-trigger Data Collection for a specific run (FAILED or PENDING)
+  @(requires: ['ReconciliationAdmin', 'OGSIntegration'])
   action retriggerDataCollection(runId : UUID) returns {
     success : Boolean;
     message : String;
@@ -29,13 +32,13 @@ service ReconciliationService @(path: '/reconciliation')
     run : redirected to ReconciliationRuns
   };
 
-  @(requires: 'ReconciliationApprover')
+  @(requires: ['ReconciliationApprover', 'OGSIntegration'])
   action approvePosting(tankResultId : UUID, comment : String) returns {
     success : Boolean;
     message : String;
   };
 
-  @(requires: 'ReconciliationApprover')
+  @(requires: ['ReconciliationApprover', 'OGSIntegration'])
   action rejectPosting(tankResultId : UUID, comment : String) returns {
     success : Boolean;
     message : String;
@@ -48,6 +51,7 @@ service ReconciliationService @(path: '/reconciliation')
   @readonly entity AuditLog as projection on db.AuditLogEntry;
 
   // ─── Tank Configuration (admin only) ────────────────────────────────────
+  @(requires: ['ReconciliationAdmin', 'OGSIntegration'])
   entity TankConfigurations as projection on db.TankConfiguration;
 
   // R12: Tank Variance Trend - 30-day delta history per tank

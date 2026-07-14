@@ -14,6 +14,10 @@
     {
       "name": "$XSAPPNAME.ReconciliationAdmin",
       "description": "Full admin access including tank configuration"
+    },
+    {
+      "name": "$XSAPPNAME.OGSIntegration",
+      "description": "Machine-to-machine full access for IS-OIL OGS system"
     }
   ],
   "role-templates": [
@@ -37,6 +41,16 @@
         "$XSAPPNAME.ReconciliationUser",
         "$XSAPPNAME.ReconciliationApprover",
         "$XSAPPNAME.ReconciliationAdmin"
+      ]
+    },
+    {
+      "name": "OGSSystemIntegration",
+      "description": "IS-OIL OGS system-to-system integration — full access to all reconciliation operations",
+      "scope-references": [
+        "$XSAPPNAME.ReconciliationUser",
+        "$XSAPPNAME.ReconciliationApprover",
+        "$XSAPPNAME.ReconciliationAdmin",
+        "$XSAPPNAME.OGSIntegration"
       ]
     }
   ],
