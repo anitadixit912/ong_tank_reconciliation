@@ -13,7 +13,7 @@ service ReconciliationService @(path: '/reconciliation')
   };
 
   @(requires: ['ReconciliationAdmin', 'OGSIntegration'])
-  action triggerRun(runDate : Date) returns {
+  action triggerRun(runDate : Date, plant : String(10)) returns {
     runId  : UUID;
     status : String;
   };

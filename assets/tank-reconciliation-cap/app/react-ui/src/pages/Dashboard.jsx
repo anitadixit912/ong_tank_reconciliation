@@ -85,7 +85,7 @@ export default function Dashboard() {
     setTriggering(true);
     setTriggerMsg(null);
     try {
-      const result = await triggerRun(triggerDate, selectedPlant || undefined);
+      const result = await triggerRun(triggerDate);
       setTriggerMsg({ type: 'success', text: `Run ${result.runId?.slice(0, 8)}… triggered for ${triggerDate}` });
       await load();
     } catch (err) {
@@ -104,9 +104,9 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* Plant filter */}
+      {/* Plant display filter */}
       <div style={{ marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-        <label style={{ fontWeight: 500, fontSize: '0.9rem' }}>Plant:</label>
+        <label style={{ fontWeight: 500, fontSize: '0.9rem' }}>Filter by Plant:</label>
         <select
           className="input"
           style={{ width: '220px' }}
@@ -151,7 +151,7 @@ export default function Dashboard() {
                 />
               </div>
               <button type="submit" className="btn btn-primary" disabled={triggering}>
-                {triggering ? 'Triggering…' : `⚡ Trigger Run${selectedPlant ? ' (' + selectedPlant + ')' : ''}`}
+                {triggering ? 'Triggering…' : '⚡ Trigger Run'}
               </button>
               <button type="button" className="btn btn-outline" onClick={load}>↻ Refresh</button>
             </div>

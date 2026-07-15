@@ -3,37 +3,31 @@
 const cds = require('@sap/cds');
 
 // S4HANA destination name — resolved at runtime via SAP Destination Service
-const S4HANA_DESTINATION = process.env.S4HANA_DESTINATION_NAME || 'S4HANA_PUBLIC_CLOUD';
+const S4HANA_DESTINATION = process.env.S4HANA_DESTINATION_NAME || 'OGS_S4';
 const AICORE_DESTINATION  = process.env.AICORE_DESTINATION_NAME || 'aicore';
 
-const S4_STOCK_PATH = '/sap/opu/odata/sap/API_MATERIAL_STOCK_SRV';
-const S4_PI_PATH    = '/sap/opu/odata/sap/API_PHYSICAL_INVENTORY_DOC_SRV';
 const S4_PLANT_PATH = '/sap/opu/odata/sap/ZTANK_PLANT_SRV_SRV';
+const S4_DIP_PATH   = '/sap/opu/odata/sap/ZTANK_DIP_SRV_SRV';
 
-// ── S/4HANA Cloud helpers ─────────────────────────────────────────────────────
+// ── IS-OIL HPM helpers ────────────────────────────────────────────────────────
 
 /**
- * Fetch book stock from API_MATERIAL_STOCK_SRV for a given material + plant.
- * Sums MatlWrhsStkQtyInMatBaseUnit across all storage locations.
- * Returns a number or null on error / not found.
+ * Fetch latest tank dip from ZTANK_DIP_SRV_SRV for a given SOCNR (tank ID).
+ * Returns { physicalQty, bookStock, uom } or null on error.
  */
-async function _fetchBookStock(materialId, plant) {
-  if (!materialId || !plant) return null;
+async function _fetchTankDip(socnr) {
+  if (!socnr) return null;
   try {
     const cfg     = await _resolveDestination(S4HANA_DESTINATION);
     const baseUrl = (cfg.URL || cfg.url || '').replace(/\/$/, '');
-    if (!baseUrl) {
-      cds.log('s4').warn('S4HANA destination has no URL — skipping live stock fetch');
-      return null;
-    }
+    if (!baseUrl) return null;
 
     const authHeader = _basicAuthHeader(cfg);
-    const filter  = "Material eq '" + materialId + "' and Plant eq '" + plant + "'";
-    const select  = 'Material,Plant,StorageLocation,MatlWrhsStkQtyInMatBaseUnit';
-    const path    = S4_STOCK_PATH + '/MatlStkInAcctMod'
+    const filter = "Socnr eq '" + socnr + "'";
+    const path   = S4_DIP_PATH + '/TankDipSet'
       + '?$filter=' + encodeURIComponent(filter)
-      + '&$select=' + encodeURIComponent(select)
-      + '&$format=json&$top=50';
+      + '&$orderby=' + encodeURIComponent('Etmstm desc')
+      + '&$top=1&$format=json';
 
     const headers = { Accept: 'application/json' };
     if (authHeader) headers['Authorization'] = authHeader;
@@ -41,53 +35,33 @@ async function _fetchBookStock(materialId, plant) {
     const proxyOpts = cfg._proxyHost ? { host: cfg._proxyHost, port: cfg._proxyPort, token: cfg._proxyToken, locationId: cfg._locationId } : null;
     const res = await _httpGet(baseUrl + path, headers, proxyOpts);
     if (res.status !== 200) {
-      cds.log('s4').warn('Material stock API returned ' + res.status + ' for ' + materialId + '/' + plant);
+      cds.log('s4').warn('ZTANK_DIP_SRV returned ' + res.status + ' for SOCNR ' + socnr);
       return null;
     }
     const payload = JSON.parse(res.body);
     const records = (payload.d && payload.d.results) ? payload.d.results : [];
     if (!records.length) return null;
 
-    return records.reduce(function(sum, r) {
-      return sum + parseFloat(r.MatlWrhsStkQtyInMatBaseUnit || '0');
-    }, 0);
+    const r = records[0];
+    return {
+      physicalQty : parseFloat(r.QuanSku  || '0'),
+      bookStock   : parseFloat(r.Relstock || '0'),
+      uom         : r.Meins || '',
+      timestamp   : r.Etmstm || '',
+      volumeLvc   : parseFloat(r.QuanLvc || '0')
+    };
   } catch (err) {
-    cds.log('s4').warn('Failed to fetch book stock from S/4HANA: ' + err.message);
+    cds.log('s4').warn('Failed to fetch tank dip: ' + err.message);
     return null;
   }
 }
 
 /**
- * Fetch latest physical inventory document for material + plant from
- * API_PHYSICAL_INVENTORY_DOC_SRV.  Returns the first record or null.
+ * Legacy stubs — kept for compatibility, now delegated to _fetchTankDip.
  */
-async function _fetchPhysicalInventory(materialId, plant) {
-  if (!materialId || !plant) return null;
-  try {
-    const cfg     = await _resolveDestination(S4HANA_DESTINATION);
-    const baseUrl = (cfg.URL || cfg.url || '').replace(/\/$/, '');
-    if (!baseUrl) return null;
+async function _fetchBookStock(materialId, plant) { return null; }
+async function _fetchPhysicalInventory(materialId, plant) { return null; }
 
-    const authHeader = _basicAuthHeader(cfg);
-    const filter = "Material eq '" + materialId + "' and Plant eq '" + plant + "'";
-    const path   = S4_PI_PATH + '/PhysicalInventoryDoc'
-      + '?$filter=' + encodeURIComponent(filter)
-      + '&$format=json&$top=1'
-      + '&$orderby=' + encodeURIComponent('FiscalYear desc,PhysicalInventoryDocument desc');
-
-    const headers = { Accept: 'application/json' };
-    if (authHeader) headers['Authorization'] = authHeader;
-
-    const res = await _httpGet(baseUrl + path, headers);
-    if (res.status !== 200) return null;
-    const payload = JSON.parse(res.body);
-    const records = (payload.d && payload.d.results) ? payload.d.results : [];
-    return records.length ? records[0] : null;
-  } catch (err) {
-    cds.log('s4').warn('Failed to fetch physical inventory: ' + err.message);
-    return null;
-  }
-}
 
 /**
  * Fetch plant list from API_PLANT_SRV.
@@ -162,22 +136,22 @@ module.exports = class ReconciliationService extends cds.ApplicationService {
         timestamp: now, actor
       });
 
-      // Fetch all active tank configs and pull live S/4HANA book stock
+      // Fetch all active tank configs and pull live IS-OIL dip data
       const tanks = await SELECT.from('tank.reconciliation.TankConfiguration').where({ active: true });
       let okCount = 0, flagCount = 0, urgentCount = 0;
 
       for (const tank of tanks) {
-        const liveStock = await _fetchBookStock(tank.materialId, tank.plant);
-        const bookStock = liveStock !== null ? liveStock : 0;
-        const s4Source  = liveStock !== null ? 'S4HANA_LIVE' : 'FALLBACK';
+        // Use tankId as SOCNR for IS-OIL dip lookup
+        const dipData = await _fetchTankDip(tank.tankId);
 
-        // ATG reading: simulate small variance (real ATG not available via standard OData)
-        const variancePct       = (Math.random() * 0.4 - 0.2);           // –0.20 … +0.20 %
-        const netVolumePhysical = bookStock > 0
-          ? bookStock * (1 + variancePct / 100)
-          : 0;
-        const delta        = netVolumePhysical - bookStock;
+        const physicalQty = dipData ? dipData.physicalQty : 0;
+        const bookStock   = dipData ? dipData.bookStock   : 0;
+        const s4Source    = dipData ? 'ISOIL_LIVE' : 'FALLBACK';
+
+        // Delta = physical dip quantity minus book stock (IS-OIL reconciliation)
+        const delta        = physicalQty - bookStock;
         const deltaPercent = bookStock > 0 ? Math.abs(delta / bookStock) * 100 : 0;
+        const netVolumePhysical = physicalQty;
 
         let classification = 'OK';
         if      (deltaPercent > (tank.toleranceFlagPct || 0.25)) classification = 'URGENT';
