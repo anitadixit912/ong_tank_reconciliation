@@ -170,3 +170,108 @@ What used to take 2–4 hours of manual work per day now completes in under 2 mi
 ## Architecture in One Sentence
 
 > **n8n workflow** on BTP orchestrates the reconciliation pipeline → **CAP application** is the persistent backbone and approval state machine → **React dashboard** is the single cockpit for all roles → **IS-OIL OGS/650** is the source of truth for tank data → **Cloud Connector** bridges the on-premise IS-OIL world to BTP securely.
+
+Architecture in One Sentence - Explain in simpler terms with diagrams please?                                                                                                                                                                
+
+⏺ Let me create a simple visual explanation:
+  
+  ---
+  Architecture — How the Pieces Connect
+
+  ┌─────────────────────────────────────────────────────────────────┐
+  │                     ON-PREMISE (OGS/650)                        │
+  │                                                                  │
+  │  🛢 Tank 1 (USMOB-17T1)    🛢 Tank 2 (USMOB-17T2)             │
+  │       Diesel                    C3 Propane                      │
+  │         │                           │                           │
+  │         └──────────────┬────────────┘                           │
+  │                        ▼                                        │
+  │              📋 OIB_TANKDIP Table                               │
+  │         (physical dip readings + book stock)                    │
+  │                        │                                        │
+  │         ┌──────────────▼──────────────┐                        │
+  │         │   ZTANK_DIP_SRV_SRV         │                        │
+  │         │   (Custom OData Service)    │                        │
+  │         └──────────────┬──────────────┘                        │
+  └────────────────────────┼────────────────────────────────────────┘
+                           │ Cloud Connector (APAC_DEV10)
+                           │ (secure tunnel through firewall)
+                           │
+  ┌────────────────────────▼────────────────────────────────────────┐
+  │                        SAP BTP                                   │
+  │                                                                  │
+  │  ┌─────────────────┐         ┌──────────────────────────────┐  │
+  │  │   n8n Workflow  │─────────▶│      CAP Application         │  │
+  │  │                 │  reads/  │                              │  │
+  │  │  1. Fetch dips  │  writes  │  • Stores run history        │  │
+  │  │  2. VCF calc    │          │  • Stores tank results       │  │
+  │  │  3. Variance    │          │  • Holds URGENT for approval │  │
+  │  │  4. Post to S4  │          │  • Full audit trail          │  │
+  │  │  5. Send report │          │                              │  │
+  │  └─────────────────┘         └──────────────┬───────────────┘  │
+  │                                              │                   │
+  │                                             ▼                   │
+  │                               ┌─────────────────────────┐      │
+  │                               │   React Dashboard        │      │
+  │                               │                          │      │
+  │                               │  📊 Dashboard (all)      │      │
+  │                               │  ✅ Approvals (super)    │      │
+  │                               │  📋 Audit Trail (all)    │      │
+  │                               │  ⚙️   Config (admin)      │      │
+  │                               └─────────────────────────┘      │
+  │                                                                  │
+  │  ┌──────────────┐  ┌─────────────┐  ┌─────────────────────┐   │
+  │  │ BTP Alert    │  │   Email     │  │   MS Teams          │   │
+  │  │ Notification │  │   Report    │  │   Webhook           │   │
+  │  └──────────────┘  └─────────────┘  └─────────────────────┘   │
+  └──────────────────────────────────────────────────────────────────┘
+                           │
+                           │ posts Material Document
+                           ▼
+                📄 S/4HANA Material Document
+                (551 = shrinkage / 552 = gain)
+
+  ---
+  In Plain English
+  
+  Think of it as 4 rooms connected by pipes:
+
+    🏭 ROOM 1          🔗 CORRIDOR        ⚙️  ROOM 2           👁️  ROOM 3
+    OGS/650             Cloud              BTP                 Dashboard
+    (the tank)          Connector          (the brain)         (what you see)
+
+    Real tank     ──── secure ────▶  n8n reads dips   ──▶  You see results
+    dip data             tunnel        CAP stores them        approve/reject
+    lives here                         alerts sent            audit trail
+
+  ---
+  Who does what
+  
+  ┌─────────────────┬──────────────────────────────────────┬───────────────────────────────┐
+  │    Component    │                 Role                 │        Simple Analogy         │
+  ├─────────────────┼──────────────────────────────────────┼───────────────────────────────┤
+  │ OGS/650         │ Where tank data lives                │ The filing cabinet            │
+  ├─────────────────┼──────────────────────────────────────┼───────────────────────────────┤
+  │ Cloud Connector │ Secure bridge between OGS and BTP    │ The locked door between rooms │
+  ├─────────────────┼──────────────────────────────────────┼───────────────────────────────┤
+  │ n8n             │ Does all the work automatically      │ The robot worker              │
+  ├─────────────────┼──────────────────────────────────────┼───────────────────────────────┤
+  │ CAP             │ Remembers everything, enforces rules │ The manager                   │
+  ├─────────────────┼──────────────────────────────────────┼───────────────────────────────┤
+  │ React Dashboard │ What people see and interact with    │ The office noticeboard        │
+  ├─────────────────┼──────────────────────────────────────┼───────────────────────────────┤
+  │ XSUAA           │ Checks who is allowed to do what     │ The security guard            │
+  └─────────────────┴──────────────────────────────────────┴───────────────────────────────┘
+
+  ---
+  The data journey in 5 steps
+
+  STEP 1          STEP 2           STEP 3          STEP 4         STEP 5
+     │               │                │               │              │
+     ▼               ▼                ▼               ▼              ▼
+  Tank dip     Cloud Connector    n8n fetches      CAP stores    Dashboard
+  in OGS  ──▶  passes it to  ──▶  dip, computes ──▶ result,  ──▶ shows result
+  OIB_TANKDIP     BTP              variance         approvals     to user
+                                   posts to S4      audit log
+
+
