@@ -142,6 +142,7 @@ module.exports = class ReconciliationService extends cds.ApplicationService {
 
       for (const tank of tanks) {
         // Use tankId as SOCNR for IS-OIL dip lookup
+        cds.log('s4').info('triggerRun: fetching dip for SOCNR=' + tank.tankId);
         const dipData = await _fetchTankDip(tank.tankId);
 
         const physicalQty = dipData ? dipData.physicalQty : 0;
