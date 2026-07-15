@@ -3,7 +3,7 @@
   "nodes": [
     {
       "parameters": {
-        "content": "ENVIRONMENT VARIABLES (configure in n8n Settings > Variables):\n\nCAP_BASE_URL          — CAP backend base URL\nS4HANA_DESTINATION    — BTP Destination name for S/4HANA = S4HANA_PUBLIC_CLOUD\nATG_BASE_URL          — ATG system API base URL\nBTP_ANS_URL           — BTP Alert Notification Service endpoint\nBTP_ANS_TOKEN         — BTP ANS bearer token\nTEAMS_WEBHOOK_URL     — MS Teams Incoming Webhook URL\nREPORT_EMAIL_RECIPIENTS — Comma-separated email list\nPDF_SERVICE_URL       — PDF generation service URL\n\nNO credentials blocks are embedded in this workflow.\nS4HANA_DESTINATION must be set to: S4HANA_PUBLIC_CLOUD"
+        "content": "ENVIRONMENT VARIABLES (configure in n8n Settings > Variables):\n\nCAP_BASE_URL          — CAP backend base URL\nS4HANA_BASE_URL       — OGS S/4HANA base URL via BTP Destination (OGS_S4)\nXSUAA_TOKEN_URL       — XSUAA token endpoint URL\nXSUAA_CLIENT_ID       — XSUAA client ID\nXSUAA_CLIENT_SECRET   — XSUAA client secret\nBTP_ANS_URL           — BTP Alert Notification Service endpoint\nBTP_ANS_TOKEN         — BTP ANS bearer token\nTEAMS_WEBHOOK_URL     — MS Teams Incoming Webhook URL\nREPORT_EMAIL_RECIPIENTS — Comma-separated email list\nPDF_SERVICE_URL       — PDF generation service URL\n\nNO credentials blocks are embedded in this workflow."
       },
       "id": "notice-env-vars",
       "name": "Env Vars",
@@ -137,20 +137,20 @@
     {
       "parameters": {
         "method": "GET",
-        "url": "={{ $vars.ATG_BASE_URL }}/api/readings",
+        "url": "={{ $vars.S4HANA_BASE_URL }}/sap/opu/odata/sap/ZTANK_DIP_SRV_SRV/TankDipSet",
         "sendQuery": true,
         "queryParameters": {
           "parameters": [
             {
-              "name": "date",
-              "value": "={{ $json.runDate }}"
+              "name": "$format",
+              "value": "json"
             }
           ]
         },
         "options": {}
       },
       "id": "atg-ingest",
-      "name": "2. ATG Ingest",
+      "name": "2. ATG Ingest → IS-OIL Tank Dip Ingest",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
       "position": [
@@ -161,69 +161,29 @@
     },
     {
       "parameters": {
-        "method": "GET",
-        "url": "={{ $vars.S4HANA_DESTINATION }}/sap/opu/odata/sap/API_PHYSICAL_INVENTORY_DOC_SRV/A_PhysInvtryDocItem",
-        "sendQuery": true,
-        "queryParameters": {
-          "parameters": [
-            {
-              "name": "$filter",
-              "value": "=PostingDate eq '{{ $('Extract runId').first().json.runDate }}'"
-            },
-            {
-              "name": "$select",
-              "value": "Material,Plant,StorageLocation,BookQuantityBeforeCount,CountedQuantity,UnitOfMeasure"
-            },
-            {
-              "name": "$format",
-              "value": "json"
-            }
-          ]
-        },
-        "options": {}
+        "jsCode": "return $input.all();"
       },
       "id": "fiori-ingest",
-      "name": "3. Fiori Physical Inventory Ingest",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4,
+      "name": "3. Data Available (IS-OIL)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
       "position": [
         960,
         80
-      ],
-      "onError": "continueErrorOutput"
+      ]
     },
     {
       "parameters": {
-        "method": "GET",
-        "url": "={{ $vars.S4HANA_DESTINATION }}/sap/opu/odata/sap/API_MATERIAL_STOCK_SRV/A_MatlStkInAcctMod",
-        "sendQuery": true,
-        "queryParameters": {
-          "parameters": [
-            {
-              "name": "$select",
-              "value": "Material,Plant,StorageLocation,MatlStkInAcctMod_Stock"
-            },
-            {
-              "name": "$filter",
-              "value": "Plant eq 'TERM1'"
-            },
-            {
-              "name": "$format",
-              "value": "json"
-            }
-          ]
-        },
-        "options": {}
+        "jsCode": "return $input.all();"
       },
       "id": "book-stock-ingest",
-      "name": "4. HPM Book Stock Read",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4,
+      "name": "4. Book Stock (from IS-OIL Dip)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
       "position": [
         960,
         240
-      ],
-      "onError": "continueErrorOutput"
+      ]
     },
     {
       "parameters": {
@@ -238,7 +198,7 @@
             },
             {
               "name": "$select",
-              "value": "tankId,materialNumber,plant,storageLocation,flagThresholdPct,urgentThresholdPct,maximumCapacityLiters"
+              "value": "tankId,tankName,materialId,plant,toleranceOkPct,toleranceFlagPct,active"
             }
           ]
         },
@@ -255,7 +215,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const runMeta = $('Extract runId').first().json;\nconst runId = runMeta.runId;\nconst runDate = runMeta.runDate;\n\nconst atgRaw = $('2. ATG Ingest').first()?.json;\nconst atgFailed = !atgRaw || atgRaw.error;\nconst atgReadings = atgFailed ? [] : (Array.isArray(atgRaw) ? atgRaw : (atgRaw.value || []));\nconst atgByTank = {};\nfor (const r of atgReadings) { atgByTank[r.tankId] = r; }\n\nconst fioriRaw = $('3. Fiori Physical Inventory Ingest').first()?.json;\nconst fioriItems = fioriRaw?.d?.results || fioriRaw?.value || [];\nconst fioriByTank = {};\nfor (const item of fioriItems) {\n  const tId = item.StorageLocation;\n  fioriByTank[tId] = { tankId: tId, fioriVolume: parseFloat(item.CountedQuantity || 0), material: item.Material, plant: item.Plant, bookQtyBefore: parseFloat(item.BookQuantityBeforeCount || 0) };\n}\n\nconst stockRaw = $('4. HPM Book Stock Read').first()?.json;\nconst stockItems = stockRaw?.d?.results || stockRaw?.value || [];\nconst stockByTank = {};\nfor (const item of stockItems) {\n  const tId = item.StorageLocation;\n  stockByTank[tId] = { tankId: tId, material: item.Material, plant: item.Plant, bookStock: parseFloat(item.MatlStkInAcctMod_Stock || 0) };\n}\n\nconst cfgRaw = $('2b. Fetch Tank Config').first()?.json;\nconst cfgItems = cfgRaw?.value || cfgRaw?.d?.results || [];\nconst cfgByTank = {};\nfor (const cfg of cfgItems) { cfgByTank[cfg.tankId] = cfg; }\n\nconst configuredTanks = Object.keys(cfgByTank);\nconst mergedTanks = [];\nconst missingTankIds = [];\n\nfor (const tankId of configuredTanks) {\n  const cfg = cfgByTank[tankId];\n  const atg = atgByTank[tankId];\n  const fiori = fioriByTank[tankId];\n  const stock = stockByTank[tankId];\n  const grossVolume = atg?.grossVolume ?? fiori?.fioriVolume ?? null;\n  const temperature = atg?.temperature ?? 15;\n  const bookStock = stock?.bookStock ?? fiori?.bookQtyBefore ?? null;\n  const material = stock?.material || fiori?.material || cfg.materialNumber;\n  const plant = stock?.plant || fiori?.plant || cfg.plant;\n  if (grossVolume === null || bookStock === null) missingTankIds.push(tankId);\n  mergedTanks.push({ tankId, material, plant, storageLocation: tankId, grossVolume, temperature, bookStock, flagThresholdPct: cfg.flagThresholdPct, urgentThresholdPct: cfg.urgentThresholdPct, maximumCapacityLiters: cfg.maximumCapacityLiters, atgPresent: !!atg, fioriPresent: !!fiori, stockPresent: !!stock });\n}\n\nconst complete = missingTankIds.length === 0;\nconst m1Message = complete\n  ? `M1.achieved: data ingestion complete — ${mergedTanks.length} tanks loaded`\n  : `M1.missed: missing readings for tanks: ${missingTankIds.join(', ')}`;\n\nreturn [{ json: { runId, runDate, complete, tanks: mergedTanks, missingTankIds, m1Message, tankCount: mergedTanks.length } }];"
+        "jsCode": "const runMeta = $('Extract runId').first().json;\nconst runId = runMeta.runId;\nconst runDate = runMeta.runDate;\n\n// Get IS-OIL tank dip data from ZTANK_DIP_SRV_SRV\nconst dipRaw = $('2. ATG Ingest → IS-OIL Tank Dip Ingest').first()?.json;\nconst dipItems = dipRaw?.d?.results || dipRaw?.value || [];\n\n// Build dip map by SOCNR\nconst dipBySocnr = {};\nfor (const dip of dipItems) {\n  const socnr = dip.Socnr;\n  // Keep only latest dip per tank (already ordered desc by ZTANK_DIP_SRV)\n  if (!dipBySocnr[socnr]) {\n    dipBySocnr[socnr] = {\n      socnr,\n      physicalQty: parseFloat(dip.QuanSku || 0),   // QUAN_SKU = physical dip quantity\n      bookStock:   parseFloat(dip.Relstock || 0),   // RELSTOCK = book stock at dip time\n      uom:         dip.Meins || 'TO',\n      timestamp:   dip.Etmstm,\n      volumeLvc:   parseFloat(dip.QuanLvc || 0)\n    };\n  }\n}\n\n// Get tank configuration from CAP\nconst cfgRaw = $('2b. Fetch Tank Config').first()?.json;\nconst cfgItems = cfgRaw?.value || cfgRaw?.d?.results || [];\n\nconst mergedTanks = [];\nconst missingTankIds = [];\n\nfor (const cfg of cfgItems) {\n  const tankId = cfg.tankId; // tankId = SOCNR in IS-OIL setup\n  const dip = dipBySocnr[tankId];\n  \n  if (!dip) {\n    missingTankIds.push(tankId);\n    mergedTanks.push({\n      tankId,\n      material: cfg.materialId,\n      plant: cfg.plant,\n      grossVolume: null,\n      temperature: null,\n      bookStock: null,\n      physicalQty: null,\n      uom: null,\n      toleranceOkPct: cfg.toleranceOkPct || 0.10,\n      toleranceFlagPct: cfg.toleranceFlagPct || 0.25,\n      dataSource: 'MISSING'\n    });\n    continue;\n  }\n  \n  mergedTanks.push({\n    tankId,\n    material: cfg.materialId,\n    plant: cfg.plant,\n    grossVolume: dip.physicalQty,\n    temperature: null, // IS-OIL dip does not include temperature directly\n    bookStock: dip.bookStock,\n    physicalQty: dip.physicalQty,\n    uom: dip.uom,\n    dipTimestamp: dip.timestamp,\n    volumeLvc: dip.volumeLvc,\n    toleranceOkPct: cfg.toleranceOkPct || 0.10,\n    toleranceFlagPct: cfg.toleranceFlagPct || 0.25,\n    dataSource: 'ISOIL_LIVE'\n  });\n}\n\nconst complete = missingTankIds.length === 0;\nconst m1Message = complete\n  ? `M1.achieved: IS-OIL dip data complete — ${mergedTanks.length} tanks loaded`\n  : `M1.missed: no dip data for tanks: ${missingTankIds.join(', ')}`;\n\nreturn [{ json: { runId, runDate, complete, tanks: mergedTanks, missingTankIds, m1Message, tankCount: mergedTanks.length } }];"
       },
       "id": "merge-validate",
       "name": "5. Merge and Validate Data",
@@ -1354,17 +1314,17 @@
       "main": [
         [
           {
-            "node": "2. ATG Ingest",
+            "node": "2. ATG Ingest → IS-OIL Tank Dip Ingest",
             "type": "main",
             "index": 0
           },
           {
-            "node": "3. Fiori Physical Inventory Ingest",
+            "node": "3. Data Available (IS-OIL)",
             "type": "main",
             "index": 0
           },
           {
-            "node": "4. HPM Book Stock Read",
+            "node": "4. Book Stock (from IS-OIL Dip)",
             "type": "main",
             "index": 0
           },
@@ -1376,7 +1336,7 @@
         ]
       ]
     },
-    "2. ATG Ingest": {
+    "2. ATG Ingest → IS-OIL Tank Dip Ingest": {
       "main": [
         [
           {
@@ -1387,7 +1347,7 @@
         ]
       ]
     },
-    "3. Fiori Physical Inventory Ingest": {
+    "3. Data Available (IS-OIL)": {
       "main": [
         [
           {
@@ -1398,7 +1358,7 @@
         ]
       ]
     },
-    "4. HPM Book Stock Read": {
+    "4. Book Stock (from IS-OIL Dip)": {
       "main": [
         [
           {
