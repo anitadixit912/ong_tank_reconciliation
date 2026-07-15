@@ -57,10 +57,10 @@ async function _fetchTankDip(socnr) {
 }
 
 /**
- * Legacy stubs — kept for compatibility, now delegated to _fetchTankDip.
+ * Legacy stubs — no longer used, kept to avoid reference errors.
  */
-async function _fetchBookStock(materialId, plant) { return null; }
-async function _fetchPhysicalInventory(materialId, plant) { return null; }
+async function _fetchBookStock() { return null; }
+async function _fetchPhysicalInventory() { return null; }
 
 
 /**
@@ -106,6 +106,102 @@ function _basicAuthHeader(cfg) {
   return 'Basic ' + Buffer.from(user + ':' + pass).toString('base64');
 }
 
+// ── Inline reconciliation (dev/demo mode when N8N_WEBHOOK_URL not set) ────────
+async function _runInlineReconciliation(runId, runDate, actor) {
+  try {
+    await UPDATE('tank.reconciliation.ReconciliationRun', runId).with({ status: 'INGESTING' });
+
+    const tanks = await SELECT.from('tank.reconciliation.TankConfiguration').where({ active: true });
+    let okCount = 0, flagCount = 0, urgentCount = 0;
+
+    for (const tank of tanks) {
+      cds.log('s4').info('inline reconciliation: fetching dip for SOCNR=' + tank.tankId);
+      const dipData = await _fetchTankDip(tank.tankId);
+
+      const physicalQty         = dipData ? dipData.physicalQty : null;
+      const bookStock           = dipData ? dipData.bookStock   : null;
+      const s4Source            = dipData ? 'ISOIL_LIVE' : null;
+
+      // If no live data available, fail this tank
+      if (!dipData || physicalQty === null || bookStock === null) {
+        cds.log('s4').warn('No live dip data for tank ' + tank.tankId + ' — skipping');
+        await INSERT.into('tank.reconciliation.AuditLogEntry').entries({
+          ID: cds.utils.uuid(), run_ID: runId, tankId: tank.tankId,
+          step: 'INGEST', milestone: 'M1', outcome: 'FAILED',
+          message: 'M1.failed: no live dip data available for tank ' + tank.tankId,
+          timestamp: new Date().toISOString(), actor
+        });
+        continue;
+      }
+
+      const grossVolumeObserved = physicalQty;
+      const vcfFactor           = 1.0;
+      const netVolumePhysical   = physicalQty * vcfFactor;
+
+      const delta        = netVolumePhysical - bookStock;
+      const deltaPercent = bookStock > 0 ? Math.abs(delta / bookStock) * 100 : 0;
+
+      let classification = 'OK';
+      if      (deltaPercent > (tank.toleranceFlagPct || 0.25)) classification = 'URGENT';
+      else if (deltaPercent > (tank.toleranceOkPct  || 0.10)) classification = 'FLAG';
+
+      if      (classification === 'OK')     okCount++;
+      else if (classification === 'FLAG')   flagCount++;
+      else if (classification === 'URGENT') urgentCount++;
+
+      await INSERT.into('tank.reconciliation.TankResult').entries({
+        ID: cds.utils.uuid(),
+        run_ID: runId,
+        tankId: tank.tankId,
+        tankName: tank.tankName,
+        materialId: tank.materialId,
+        plant: tank.plant,
+        grossVolumeObserved,
+        netVolumePhysical,
+        bookStock,
+        delta,
+        deltaPercent,
+        classification,
+        toleranceOkPct:   tank.toleranceOkPct  || 0.10,
+        toleranceFlagPct: tank.toleranceFlagPct || 0.25,
+        postingStatus:    'PENDING',
+        vcfSource: s4Source,
+        vcfFactor
+      });
+
+      await INSERT.into('tank.reconciliation.AuditLogEntry').entries({
+        ID: cds.utils.uuid(), run_ID: runId, tankId: tank.tankId,
+        step: 'VARIANCE', milestone: 'M3', outcome: 'ACHIEVED',
+        message: 'M3.variance: ' + tank.tankId
+          + ' bookStock=' + bookStock.toFixed(3)
+          + ' netPhysical=' + netVolumePhysical.toFixed(3)
+          + ' delta=' + delta.toFixed(3)
+          + ' (' + deltaPercent.toFixed(4) + '%)'
+          + ' class=' + classification
+          + ' source=' + s4Source,
+        timestamp: new Date().toISOString(), actor
+      });
+    }
+
+    await UPDATE('tank.reconciliation.ReconciliationRun', runId).with({
+      status: 'COMPLETED',
+      completedAt: new Date().toISOString(),
+      tankCount: tanks.length,
+      okCount, flagCount, urgentCount
+    });
+
+    await INSERT.into('tank.reconciliation.AuditLogEntry').entries({
+      ID: cds.utils.uuid(), run_ID: runId,
+      step: 'REPORT', milestone: 'M6', outcome: 'ACHIEVED',
+      message: 'M6.complete: run finished — ' + tanks.length + ' tanks (OK:' + okCount + ' FLAG:' + flagCount + ' URGENT:' + urgentCount + ')',
+      timestamp: new Date().toISOString(), actor
+    });
+  } catch (err) {
+    cds.log('s4').error('Inline reconciliation failed: ' + err.message);
+    await UPDATE('tank.reconciliation.ReconciliationRun', runId).with({ status: 'FAILED' });
+  }
+}
+
 // ── Service module ────────────────────────────────────────────────────────────
 
 module.exports = class ReconciliationService extends cds.ApplicationService {
@@ -126,9 +222,12 @@ module.exports = class ReconciliationService extends cds.ApplicationService {
       const now   = new Date().toISOString();
       const actor = (req.user && req.user.id) || 'scheduler';
 
+      // Create run with PENDING status — n8n will drive it through states
       await INSERT.into('tank.reconciliation.ReconciliationRun').entries({
-        ID: runId, runDate, status: 'PROCESSING', triggeredBy: actor, triggeredAt: now
+        ID: runId, runDate, status: 'PENDING', triggeredBy: actor, triggeredAt: now
       });
+
+      // M1 audit log
       await INSERT.into('tank.reconciliation.AuditLogEntry').entries({
         ID: cds.utils.uuid(), run_ID: runId,
         step: 'INGEST', milestone: 'M1', outcome: 'ACHIEVED',
@@ -136,85 +235,16 @@ module.exports = class ReconciliationService extends cds.ApplicationService {
         timestamp: now, actor
       });
 
-      // Fetch all active tank configs and pull live IS-OIL dip data
-      const tanks = await SELECT.from('tank.reconciliation.TankConfiguration').where({ active: true });
-      let okCount = 0, flagCount = 0, urgentCount = 0;
-
-      for (const tank of tanks) {
-        // Use tankId as SOCNR for IS-OIL dip lookup
-        cds.log('s4').info('triggerRun: fetching dip for SOCNR=' + tank.tankId);
-        const dipData = await _fetchTankDip(tank.tankId);
-
-        const physicalQty = dipData ? dipData.physicalQty : 0;
-        const bookStock   = dipData ? dipData.bookStock   : 0;
-        const s4Source    = dipData ? 'ISOIL_LIVE' : 'FALLBACK';
-
-        // Delta = physical dip quantity minus book stock (IS-OIL reconciliation)
-        const delta        = physicalQty - bookStock;
-        const deltaPercent = bookStock > 0 ? Math.abs(delta / bookStock) * 100 : 0;
-        const netVolumePhysical = physicalQty;
-
-        let classification = 'OK';
-        if      (deltaPercent > (tank.toleranceFlagPct || 0.25)) classification = 'URGENT';
-        else if (deltaPercent > (tank.toleranceOkPct  || 0.10)) classification = 'FLAG';
-
-        if      (classification === 'OK')     okCount++;
-        else if (classification === 'FLAG')   flagCount++;
-        else if (classification === 'URGENT') urgentCount++;
-
-        const resultId = cds.utils.uuid();
-        await INSERT.into('tank.reconciliation.TankResult').entries({
-          ID: resultId,
-          run_ID: runId,
-          tankId: tank.tankId,
-          tankName: tank.tankName,
-          materialId: tank.materialId,
-          plant: tank.plant,
-          grossVolumeObserved: netVolumePhysical,
-          netVolumePhysical,
-          bookStock,
-          delta,
-          deltaPercent,
-          classification,
-          toleranceOkPct:   tank.toleranceOkPct  || 0.10,
-          toleranceFlagPct: tank.toleranceFlagPct || 0.25,
-          postingStatus:    classification === 'URGENT' ? 'PENDING' : 'AUTO_POSTED',
-          vcfSource: s4Source,
-          vcfFactor: 1.0
-        });
-
-        await INSERT.into('tank.reconciliation.AuditLogEntry').entries({
-          ID: cds.utils.uuid(), run_ID: runId, tankId: tank.tankId,
-          step: 'RECONCILE', milestone: 'M2', outcome: 'ACHIEVED',
-          message: 'M2.reconciled: ' + tank.tankId
-            + ' bookStock=' + bookStock.toFixed(2)
-            + ' netPhysical=' + netVolumePhysical.toFixed(2)
-            + ' delta=' + delta.toFixed(2)
-            + ' (' + deltaPercent.toFixed(4) + '%)'
-            + ' class=' + classification
-            + ' source=' + s4Source,
-          timestamp: new Date().toISOString(), actor
-        });
+      // Notify n8n to start the reconciliation workflow
+      const webhookUrl = process.env.N8N_WEBHOOK_URL;
+      if (webhookUrl) {
+        _notifyWebhook(webhookUrl, { runId, runDate });
+      } else {
+        // No n8n configured — run inline reconciliation for demo/dev purposes
+        await _runInlineReconciliation(runId, runDate, actor);
       }
 
-      await UPDATE('tank.reconciliation.ReconciliationRun', runId).with({
-        status: 'COMPLETED',
-        completedAt: new Date().toISOString(),
-        tankCount: tanks.length,
-        okCount, flagCount, urgentCount
-      });
-
-      await INSERT.into('tank.reconciliation.AuditLogEntry').entries({
-        ID: cds.utils.uuid(), run_ID: runId,
-        step: 'COMPLETE', milestone: 'M5', outcome: 'ACHIEVED',
-        message: 'M5.complete: run finished — ' + tanks.length + ' tanks (OK:' + okCount + ' FLAG:' + flagCount + ' URGENT:' + urgentCount + ')',
-        timestamp: new Date().toISOString(), actor
-      });
-
-      const webhookUrl = process.env.N8N_WEBHOOK_URL;
-      if (webhookUrl) _notifyWebhook(webhookUrl, { runId, runDate, triggeredBy: actor, okCount, flagCount, urgentCount });
-
-      return { runId, status: 'COMPLETED' };
+      return { runId, status: 'PENDING' };
     });
 
     // ── approvePosting ───────────────────────────────────────────────────────
@@ -234,7 +264,7 @@ module.exports = class ReconciliationService extends cds.ApplicationService {
         ID: cds.utils.uuid(), tankResult_ID: tankResultId, run_ID: result.run_ID,
         decision: 'APPROVED', decidedBy, decidedAt: now, comment: comment || ''
       });
-      await UPDATE('tank.reconciliation.TankResult', tankResultId).with({ postingStatus: 'APPROVED' });
+      await UPDATE('tank.reconciliation.TankResult', tankResultId).with({ postingStatus: 'PENDING' });
       await INSERT.into('tank.reconciliation.AuditLogEntry').entries({
         ID: cds.utils.uuid(), run_ID: result.run_ID, tankId: result.tankId,
         step: 'APPROVAL', milestone: 'M4', outcome: 'ACHIEVED',
