@@ -205,8 +205,37 @@ async function _runInlineReconciliation(runId, runDate, actor) {
       }
 
       const grossVolumeObserved = physicalQty;
-      const vcfFactor           = 1.0;
-      const netVolumePhysical   = physicalQty * vcfFactor;
+
+      // M2: VCF Correction — attempt Hydrocarbon Qty Conversion API, fallback to ASTM 1.0
+      let vcfFactor  = 1.0;
+      let vcfSource2 = 'ASTM_FALLBACK';
+      try {
+        const vcfApiUrl = process.env.VCF_API_URL;
+        if (vcfApiUrl) {
+          // Call Hydrocarbon Quantity Conversion REST API if configured
+          const vcfPayload = JSON.stringify({ material: tank.materialId, grossVolume: grossVolumeObserved, uom: dipData.uom || 'TO' });
+          const vcfRes = await _httpPost(vcfApiUrl, vcfPayload, { 'Content-Type': 'application/json' });
+          if (vcfRes.status === 200) {
+            const vcfData = JSON.parse(vcfRes.body);
+            vcfFactor  = vcfData.vcfFactor || 1.0;
+            vcfSource2 = 'API';
+          }
+        }
+      } catch (_) { /* ASTM fallback */ }
+
+      const netVolumePhysical = grossVolumeObserved * vcfFactor;
+
+      // M2 audit entry
+      await INSERT.into('tank.reconciliation.AuditLogEntry').entries({
+        ID: cds.utils.uuid(), run_ID: runId, tankId: tank.tankId,
+        step: 'VCF', milestone: 'M2', outcome: 'ACHIEVED',
+        message: 'M2.vcf: grossVolume=' + grossVolumeObserved.toFixed(3)
+          + ' vcfFactor=' + vcfFactor.toFixed(6)
+          + ' netVolume=' + netVolumePhysical.toFixed(3)
+          + ' source=' + vcfSource2
+          + (vcfSource2 === 'ASTM_FALLBACK' ? ' (VCF_API_URL not configured — using factor 1.0)' : ''),
+        timestamp: new Date().toISOString(), actor
+      });
 
       const delta        = netVolumePhysical - bookStock;
       const deltaPercent = bookStock > 0 ? Math.abs(delta / bookStock) * 100 : 0;
@@ -235,7 +264,7 @@ async function _runInlineReconciliation(runId, runDate, actor) {
         toleranceOkPct:   tank.toleranceOkPct  || 0.10,
         toleranceFlagPct: tank.toleranceFlagPct || 0.25,
         postingStatus:    'PENDING',
-        vcfSource: s4Source,
+        vcfSource: vcfSource2,
         vcfFactor
       });
 
