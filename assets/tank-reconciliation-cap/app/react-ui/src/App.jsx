@@ -7,6 +7,7 @@ import AuditTrail    from './pages/AuditTrail.jsx';
 import Configuration from './pages/Configuration.jsx';
 import TrendChart    from './pages/TrendChart.jsx';
 import AiChat        from './pages/AiChat.jsx';
+import NotificationBell from './components/NotificationBell.jsx';
 import { AuthProvider, useAuth } from './AuthContext.jsx';
 
 function ProtectedRoute({ children, requireSupervisor, requireAdmin }) {
@@ -58,6 +59,7 @@ function AppShell() {
       <div className="app-main">
         <div className="app-topbar">
           <span>⛽ Hydrocarbon Tank Stock Reconciliation Cockpit</span>
+          <NotificationBell />
         </div>
         <div className="shell-content">
           <Routes>
