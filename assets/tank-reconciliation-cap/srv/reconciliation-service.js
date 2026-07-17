@@ -6,8 +6,9 @@ const cds = require('@sap/cds');
 const S4HANA_DESTINATION = process.env.S4HANA_DESTINATION_NAME || 'OGS_S4';
 const AICORE_DESTINATION  = process.env.AICORE_DESTINATION_NAME || 'aicore';
 
-const S4_PLANT_PATH = '/sap/opu/odata/sap/ZTANK_PLANT_SRV_SRV';
-const S4_DIP_PATH   = '/sap/opu/odata/sap/ZTANK_DIP_SRV_SRV';
+const S4_PLANT_PATH   = '/sap/opu/odata/sap/ZTANK_PLANT_SRV_SRV';
+const S4_DIP_PATH     = '/sap/opu/odata/sap/ZTANK_DIP_SRV_SRV';
+const S4_POSTING_PATH = '/sap/opu/odata/sap/ZTANK_POST_SRV_SRV';
 
 // ── IS-OIL HPM helpers ────────────────────────────────────────────────────────
 
@@ -61,6 +62,75 @@ async function _fetchTankDip(socnr) {
  */
 async function _fetchBookStock() { return null; }
 async function _fetchPhysicalInventory() { return null; }
+
+/**
+ * Post a tank dip goods movement via ZTANK_POST_SRV_SRV in OGS.
+ * Returns { success, materialDocument, message }
+ */
+async function _postTankDip(socnr, etmstm, quanSku, relstock, meins) {
+  try {
+    const cfg     = await _resolveDestination(S4HANA_DESTINATION);
+    const baseUrl = (cfg.URL || cfg.url || '').replace(/\/$/, '');
+    if (!baseUrl) return { success: false, message: 'S4HANA destination URL not found' };
+
+    const authHeader = _basicAuthHeader(cfg);
+    const proxyOpts  = cfg._proxyHost ? { host: cfg._proxyHost, port: cfg._proxyPort, token: cfg._proxyToken, locationId: cfg._locationId } : null;
+
+    // Step 1: Fetch CSRF token and session cookie in one request
+    const tokenHeaders = { Accept: 'application/json', 'x-csrf-token': 'Fetch' };
+    if (authHeader) tokenHeaders['Authorization'] = authHeader;
+
+    const tokenRes = await _httpGet(baseUrl + S4_POSTING_PATH + '/TankPostingSet', tokenHeaders, proxyOpts);
+    const csrfToken = (tokenRes.headers && (tokenRes.headers['x-csrf-token'] || tokenRes.headers['X-CSRF-Token'])) || null;
+
+    // Extract session cookie from response
+    const setCookie = tokenRes.headers && tokenRes.headers['set-cookie'];
+    let sessionCookie = '';
+    if (setCookie) {
+      const cookies = Array.isArray(setCookie) ? setCookie : [setCookie];
+      sessionCookie = cookies.map(c => c.split(';')[0]).join('; ');
+    }
+
+    cds.log('s4').info('_postTankDip: CSRF=' + (csrfToken ? 'found' : 'MISSING') + ' cookie=' + (sessionCookie ? 'found' : 'MISSING') + ' status=' + tokenRes.status);
+
+    // Step 2: POST with CSRF token and session cookie
+    const body = JSON.stringify({
+      Socnr:    socnr,
+      Etmstm:   etmstm,
+      QuanSku:  String(quanSku),
+      Relstock: String(relstock),
+      Meins:    meins,
+      Socev:    'C'
+    });
+
+    const postHeaders = {
+      'Content-Type': 'application/json',
+      Accept: 'application/json'
+    };
+    if (authHeader)    postHeaders['Authorization']  = authHeader;
+    if (csrfToken)     postHeaders['x-csrf-token']   = csrfToken;
+    if (sessionCookie) postHeaders['Cookie']          = sessionCookie;
+
+    const res = await _httpPost(baseUrl + S4_POSTING_PATH + '/TankPostingSet', body, postHeaders, proxyOpts);
+    cds.log('s4').info('_postTankDip POST status=' + res.status);
+
+    if (res.status === 201 || res.status === 200) {
+      const payload = JSON.parse(res.body);
+      const d = payload.d || {};
+      return {
+        success:          true,
+        materialDocument: d.MaterialDocument || '',
+        message:          d.PostingResult || 'Posting completed'
+      };
+    } else {
+      let errMsg = 'HTTP ' + res.status;
+      try { errMsg = JSON.parse(res.body)?.error?.message?.value || errMsg; } catch(_) {}
+      return { success: false, message: errMsg };
+    }
+  } catch (err) {
+    return { success: false, message: 'Posting failed: ' + err.message };
+  }
+}
 
 
 /**
@@ -190,15 +260,82 @@ async function _runInlineReconciliation(runId, runDate, actor) {
       okCount, flagCount, urgentCount
     });
 
+    // M6: Send alerts and notifications
+    await _sendM6Notifications(runId, runDate, tanks.length, okCount, flagCount, urgentCount);
+
     await INSERT.into('tank.reconciliation.AuditLogEntry').entries({
       ID: cds.utils.uuid(), run_ID: runId,
       step: 'REPORT', milestone: 'M6', outcome: 'ACHIEVED',
-      message: 'M6.complete: run finished — ' + tanks.length + ' tanks (OK:' + okCount + ' FLAG:' + flagCount + ' URGENT:' + urgentCount + ')',
+      message: 'M6.complete: run finished — ' + tanks.length + ' tanks (OK:' + okCount + ' FLAG:' + flagCount + ' URGENT:' + urgentCount + ') — alerts sent',
       timestamp: new Date().toISOString(), actor
     });
   } catch (err) {
     cds.log('s4').error('Inline reconciliation failed: ' + err.message);
     await UPDATE('tank.reconciliation.ReconciliationRun', runId).with({ status: 'FAILED' });
+  }
+}
+
+// ── M6: Alert & Report Distribution ──────────────────────────────────────────
+
+async function _sendM6Notifications(runId, runDate, tankCount, okCount, flagCount, urgentCount) {
+  const status = urgentCount > 0 ? 'URGENT' : (flagCount > 0 ? 'FLAG' : 'OK');
+  const emoji  = status === 'URGENT' ? '🔴' : (status === 'FLAG' ? '🟡' : '🟢');
+
+  const summary = `${emoji} Tank Reconciliation Run — ${runDate}\n`
+    + `Status: ${status}\n`
+    + `Tanks: ${tankCount} total | OK: ${okCount} | FLAG: ${flagCount} | URGENT: ${urgentCount}\n`
+    + `Run ID: ${runId}`;
+
+  // 1. MS Teams / Generic Webhook
+  const teamsUrl = process.env.TEAMS_WEBHOOK_URL;
+  if (teamsUrl) {
+    try {
+      const teamsPayload = JSON.stringify({
+        text: summary,
+        title: `Tank Reconciliation — ${runDate}`,
+        themeColor: status === 'URGENT' ? 'FF0000' : (status === 'FLAG' ? 'FFA500' : '00FF00'),
+        sections: [{
+          activityTitle: `Run ${runDate}`,
+          facts: [
+            { name: 'Status',  value: status },
+            { name: 'Total Tanks', value: String(tankCount) },
+            { name: 'OK',      value: String(okCount) },
+            { name: 'FLAG',    value: String(flagCount) },
+            { name: 'URGENT',  value: String(urgentCount) }
+          ]
+        }]
+      });
+      await _httpPost(teamsUrl, teamsPayload, { 'Content-Type': 'application/json' });
+      cds.log('s4').info('M6: Teams notification sent');
+    } catch (err) {
+      cds.log('s4').warn('M6: Teams notification failed: ' + err.message);
+    }
+  }
+
+  // 2. BTP Alert Notification Service
+  const ansUrl   = process.env.BTP_ANS_URL;
+  const ansToken = process.env.BTP_ANS_TOKEN;
+  if (ansUrl && ansToken) {
+    try {
+      const ansPayload = JSON.stringify({
+        eventType:   'TankReconciliationCompleted',
+        severity:    status === 'URGENT' ? 'ERROR' : (status === 'FLAG' ? 'WARNING' : 'INFO'),
+        category:    'ALERT',
+        subject:     `Tank Reconciliation ${runDate} — ${status}`,
+        body:        summary,
+        tags:        { runId, runDate, status }
+      });
+      await _httpPost(ansUrl + '/cf/producer/v1/resource-events',
+        ansPayload,
+        { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + ansToken });
+      cds.log('s4').info('M6: BTP ANS alert sent');
+    } catch (err) {
+      cds.log('s4').warn('M6: BTP ANS alert failed: ' + err.message);
+    }
+  }
+
+  if (!teamsUrl && !ansUrl) {
+    cds.log('s4').info('M6: No notification channels configured (set TEAMS_WEBHOOK_URL or BTP_ANS_URL)');
   }
 }
 
@@ -264,7 +401,7 @@ module.exports = class ReconciliationService extends cds.ApplicationService {
         ID: cds.utils.uuid(), tankResult_ID: tankResultId, run_ID: result.run_ID,
         decision: 'APPROVED', decidedBy, decidedAt: now, comment: comment || ''
       });
-      await UPDATE('tank.reconciliation.TankResult', tankResultId).with({ postingStatus: 'PENDING' });
+
       await INSERT.into('tank.reconciliation.AuditLogEntry').entries({
         ID: cds.utils.uuid(), run_ID: result.run_ID, tankId: result.tankId,
         step: 'APPROVAL', milestone: 'M4', outcome: 'ACHIEVED',
@@ -272,9 +409,46 @@ module.exports = class ReconciliationService extends cds.ApplicationService {
         timestamp: now, actor: decidedBy
       });
 
+      // M5: Attempt goods movement posting via ZTANK_POST_SRV_SRV
+      const dipData = await _fetchTankDip(result.tankId);
+      const postResult = await _postTankDip(
+        result.tankId,
+        dipData ? dipData.timestamp : '',
+        result.netVolumePhysical,
+        result.bookStock,
+        result.meins || 'TO'
+      );
+
+      if (postResult.success) {
+        await UPDATE('tank.reconciliation.TankResult', tankResultId).with({
+          postingStatus: 'POSTED',
+          materialDocumentId: postResult.materialDocument
+        });
+        await INSERT.into('tank.reconciliation.AuditLogEntry').entries({
+          ID: cds.utils.uuid(), run_ID: result.run_ID, tankId: result.tankId,
+          step: 'POSTING', milestone: 'M5', outcome: 'ACHIEVED',
+          message: 'M5.posted: goods movement posted — doc=' + postResult.materialDocument + ' — ' + postResult.message,
+          timestamp: new Date().toISOString(), actor: decidedBy
+        });
+      } else {
+        await UPDATE('tank.reconciliation.TankResult', tankResultId).with({
+          postingStatus: 'FAILED',
+          rejectionReason: postResult.message
+        });
+        await INSERT.into('tank.reconciliation.AuditLogEntry').entries({
+          ID: cds.utils.uuid(), run_ID: result.run_ID, tankId: result.tankId,
+          step: 'POSTING', milestone: 'M5', outcome: 'FAILED',
+          message: 'M5.failed: goods movement posting failed — ' + postResult.message,
+          timestamp: new Date().toISOString(), actor: decidedBy
+        });
+      }
+
       const callbackUrl = process.env.N8N_APPROVAL_CALLBACK_URL;
       if (callbackUrl) _notifyWebhook(callbackUrl, { tankResultId, decision: 'APPROVED', runId: result.run_ID, decidedBy });
-      return { success: true, message: 'Tank ' + result.tankId + ' approved for posting' };
+      return { success: true, message: postResult.success
+        ? 'Tank ' + result.tankId + ' approved and posted — doc ' + postResult.materialDocument
+        : 'Tank ' + result.tankId + ' approved — posting failed: ' + postResult.message
+      };
     });
 
     // ── rejectPosting ────────────────────────────────────────────────────────
@@ -538,26 +712,42 @@ async function _httpGet(url, headers, proxyOpts) {
     const req = lib.request(opts, (res) => {
       let body = '';
       res.on('data', c => { body += c; });
-      res.on('end', () => resolve({ status: res.statusCode, body }));
+      res.on('end', () => resolve({ status: res.statusCode, body, headers: res.headers }));
     });
     req.on('error', reject);
     req.end();
   });
 }
 
-async function _httpPost(url, body, headers) {
+async function _httpPost(url, body, headers, proxyOpts) {
   const https = require('https');
   const http  = require('http');
   return new Promise((resolve, reject) => {
-    const u    = new URL(url);
-    const lib  = u.protocol === 'https:' ? https : http;
-    const opts = {
-      hostname: u.hostname,
-      port:     u.port || (u.protocol === 'https:' ? 443 : 80),
-      path:     u.pathname + u.search,
-      method:   'POST',
-      headers:  { ...headers, 'Content-Length': Buffer.byteLength(body) }
-    };
+    const u = new URL(url);
+    let opts;
+    if (proxyOpts && proxyOpts.host) {
+      opts = {
+        hostname: proxyOpts.host,
+        port:     proxyOpts.port || 20003,
+        path:     url,
+        method:   'POST',
+        headers:  {
+          ...headers,
+          'Content-Length': Buffer.byteLength(body),
+          'Proxy-Authorization': 'Bearer ' + proxyOpts.token,
+          'SAP-Connectivity-SCC-Location_ID': proxyOpts.locationId || ''
+        }
+      };
+    } else {
+      opts = {
+        hostname: u.hostname,
+        port:     u.port || (u.protocol === 'https:' ? 443 : 80),
+        path:     u.pathname + u.search,
+        method:   'POST',
+        headers:  { ...headers, 'Content-Length': Buffer.byteLength(body) }
+      };
+    }
+    const lib = (proxyOpts && proxyOpts.host) ? http : (u.protocol === 'https:' ? https : http);
     const req = lib.request(opts, (res) => {
       let data = '';
       res.on('data', c => { data += c; });
