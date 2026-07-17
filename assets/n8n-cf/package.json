@@ -1,0 +1,14 @@
+{
+  "name": "tank-reconciliation-n8n",
+  "version": "1.0.0",
+  "description": "n8n workflow automation for Tank Reconciliation",
+  "scripts": {
+    "start": "n8n start"
+  },
+  "dependencies": {
+    "n8n": "^1.0.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
