@@ -556,9 +556,10 @@ module.exports = class ReconciliationService extends cds.ApplicationService {
 
       let tankSummary = 'No reconciliation data available yet.';
       let sources     = '';
+      let tanks       = [];
 
       if (latestRun) {
-        const tanks   = await SELECT.from('tank.reconciliation.TankResult')
+        tanks   = await SELECT.from('tank.reconciliation.TankResult')
           .where({ run_ID: latestRun.ID }).orderBy({ deltaPercent: 'desc' });
         const urgent  = tanks.filter(t => t.classification === 'URGENT');
         const flagged = tanks.filter(t => t.classification === 'FLAG');
@@ -583,7 +584,7 @@ module.exports = class ReconciliationService extends cds.ApplicationService {
         const reply = await _callAiCore(systemPrompt, message);
         return { reply, sources };
       } catch (_err) {
-        return { reply: _fallbackReply(message, latestRun, tankSummary), sources };
+        return { reply: _fallbackReply(message, latestRun, tankSummary, tanks || []), sources };
       }
     });
 
@@ -788,18 +789,106 @@ async function _httpPost(url, body, headers, proxyOpts) {
   });
 }
 
-function _fallbackReply(message, latestRun, tankSummary) {
+function _fallbackReply(message, latestRun, tankSummary, tanks) {
   const q = (message || '').toLowerCase();
   if (!latestRun) return 'No reconciliation runs found yet. Trigger a run first.';
-  if (q.includes('urgent') || q.includes('critical'))
+
+  tanks = tanks || [];
+
+  // Check if asking about a specific tank by SOCNR
+  const socnrMatch = message.match(/\b0{15,}\d+\b/);
+  const specificTankId = socnrMatch ? socnrMatch[0] : null;
+  const specificTank = specificTankId ? tanks.find(t => t.tankId === specificTankId) : null;
+
+  // Recommendation logic — data-driven, not hallucinated
+  if (q.includes('recommend') || q.includes('advice') || q.includes('suggest') || q.includes('what should') || q.includes('what do')) {
+    if (specificTank) {
+      const pct    = parseFloat(specificTank.deltaPercent || 0);
+      const delta  = parseFloat(specificTank.delta || 0);
+      const phys   = parseFloat(specificTank.netVolumePhysical || 0);
+      const book   = parseFloat(specificTank.bookStock || 0);
+      const name   = specificTank.tankName || specificTankId;
+      const cls    = specificTank.classification;
+
+      if (cls === 'URGENT' && pct > 500) {
+        return `**Recommendation for ${name} (${specificTankId}):**\n\n` +
+          `⚠️ Variance: **${pct.toFixed(2)}%** — Physical: ${phys.toFixed(3)} TO, Book: ${book.toFixed(3)} TO, Delta: ${delta.toFixed(3)} TO\n\n` +
+          `This extremely large variance (>${pct.toFixed(0)}%) is almost certainly a **data quality issue**, not a physical stock loss:\n\n` +
+          `1. The dip record in OIB_TANKDIP may be from a **previous period** (book stock was near zero at that time)\n` +
+          `2. The **RELSTOCK** (book stock) in the dip was not updated correctly when the dip was recorded\n` +
+          `3. A fresh dip needs to be recorded via **O4_TIGER** with current actual book stock\n\n` +
+          `**Action: Reject this posting** and ask the terminal operator to record a fresh dip in O4_TIGER.`;
+      }
+
+      if (cls === 'URGENT' && pct <= 500) {
+        return `**Recommendation for ${name} (${specificTankId}):**\n\n` +
+          `Variance: **${pct.toFixed(2)}%** — Physical: ${phys.toFixed(3)} TO, Book: ${book.toFixed(3)} TO, Delta: ${delta.toFixed(3)} TO\n\n` +
+          `This variance exceeds the FLAG threshold (${specificTank.toleranceFlagPct || 0.25}%).\n\n` +
+          `Before approving or rejecting:\n` +
+          `1. **Verify** the physical dip reading was taken correctly at the right time\n` +
+          `2. **Check** if any goods movements (receipts/issues) occurred between the dip and book stock snapshot\n` +
+          `3. **Review** if the VCF factor was applied correctly (current: ${specificTank.vcfFactor || 1.0})\n\n` +
+          `If the variance is confirmed as legitimate → **Approve** with a comment explaining the cause.\n` +
+          `If the reading appears incorrect → **Reject** and re-measure.`;
+      }
+
+      if (cls === 'FLAG') {
+        return `**Recommendation for ${name} (${specificTankId}):**\n\n` +
+          `Variance: **${pct.toFixed(2)}%** — within FLAG range. Physical: ${phys.toFixed(3)} TO, Book: ${book.toFixed(3)} TO.\n\n` +
+          `FLAG variances post automatically but are worth monitoring. No immediate action required.`;
+      }
+
+      return `Tank **${name}** (${specificTankId}) is classified as **${cls}** with a variance of ${pct.toFixed(2)}%. No action required.`;
+    }
+
+    // General recommendation
+    const urgentTanks = tanks.filter(t => t.classification === 'URGENT');
+    if (urgentTanks.length === 0) return `All tanks are within tolerance in the latest run (${latestRun.runDate}). No action required.`;
+    return `**${urgentTanks.length} URGENT tank(s)** require attention:\n\n` +
+      urgentTanks.map(t => `- **${t.tankName || t.tankId}**: ${parseFloat(t.deltaPercent).toFixed(2)}% variance`).join('\n') +
+      `\n\nGo to **✅ Approval Queue** to review each one.`;
+  }
+
+  // Specific tank status query
+  if (specificTank) {
+    const pct = parseFloat(specificTank.deltaPercent || 0);
+    return `**${specificTank.tankName || specificTankId}** (${specificTankId}):\n` +
+      `- Classification: **${specificTank.classification}**\n` +
+      `- Physical: ${parseFloat(specificTank.netVolumePhysical || 0).toFixed(3)} ${specificTank.meins || 'TO'}\n` +
+      `- Book Stock: ${parseFloat(specificTank.bookStock || 0).toFixed(3)} ${specificTank.meins || 'TO'}\n` +
+      `- Delta: ${parseFloat(specificTank.delta || 0).toFixed(3)} (${pct.toFixed(4)}%)\n` +
+      `- Posting Status: ${specificTank.postingStatus || 'PENDING'}\n` +
+      `- VCF Source: ${specificTank.vcfSource || 'N/A'}`;
+  }
+
+  // Standard queries
+  if (q.includes('urgent') || q.includes('critical')) {
+    const urgentTanks = tanks.filter(t => t.classification === 'URGENT');
     return latestRun.urgentCount > 0
-      ? 'There are ' + latestRun.urgentCount + ' URGENT variance(s) in the latest run (' + latestRun.runDate + ') requiring supervisor approval.\n\n' + tankSummary
-      : 'No URGENT variances in the latest run (' + latestRun.runDate + '). All tanks are within limits.';
-  if (q.includes('flag') || q.includes('warning'))
-    return 'Latest run (' + latestRun.runDate + '): ' + latestRun.flagCount + ' flagged tank(s).\n\n' + tankSummary;
-  if (q.includes('status') || q.includes('latest') || q.includes('last') || q.includes('summary'))
-    return tankSummary;
-  return 'Here is the latest reconciliation context:\n\n' + tankSummary + '\n\nAsk me about specific tanks, variances, or approvals.';
+      ? `**${latestRun.urgentCount} URGENT** variance(s) in run ${latestRun.runDate}:\n\n` +
+        urgentTanks.map(t => `- ${t.tankName || t.tankId}: **${parseFloat(t.deltaPercent).toFixed(2)}%**`).join('\n') +
+        `\n\nGo to **✅ Approval Queue** to approve or reject.`
+      : `No URGENT variances in the latest run (${latestRun.runDate}).`;
+  }
+
+  if (q.includes('approve') || q.includes('approval'))
+    return latestRun.urgentCount > 0
+      ? `**${latestRun.urgentCount} tank(s)** require approval. Go to **✅ Approval Queue** in the sidebar.`
+      : `No tanks currently require approval.`;
+
+  if (q.includes('status') || q.includes('latest') || q.includes('summary') || q.includes('overview'))
+    return `**Latest Reconciliation (${latestRun.runDate}):**\n\n${tankSummary}`;
+
+  if (q.includes('audit') || q.includes('history'))
+    return `Click **📋 Audit Trail** in the sidebar to see the full M1→M6 milestone history.`;
+
+  if (q.includes('trigger') || q.includes('run') || q.includes('start'))
+    return `Go to the **Dashboard**, select a date, and click **⚡ Trigger Run** to start a reconciliation.`;
+
+  return `**Latest (${latestRun.runDate}):**\n\n${tankSummary}\n\nTry asking:\n` +
+    `- "Recommendation for tank 00000000000000000023"\n` +
+    `- "Which tanks need approval?"\n` +
+    `- "Show me the status summary"`;
 }
 
 // ── Webhook fire-and-forget ───────────────────────────────────────────────────

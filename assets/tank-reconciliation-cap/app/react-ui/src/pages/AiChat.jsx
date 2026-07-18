@@ -81,11 +81,11 @@ export default function AiChat() {
                 padding: '0.6rem 1rem',
                 borderRadius: msg.role === 'user' ? '1rem 1rem 0.25rem 1rem' : '1rem 1rem 1rem 0.25rem',
                 background: msg.role === 'user'
-                  ? 'var(--sapButton_Background, #0070f2)'
+                  ? '#0070f2'
                   : msg.isError
-                    ? 'var(--sapErrorBackground, #ffd0d0)'
-                    : 'var(--sapTile_Background, #f5f5f5)',
-                color: msg.role === 'user' ? '#fff' : 'inherit',
+                    ? '#ffd0d0'
+                    : '#f0f2f5',
+                color: msg.role === 'user' ? '#ffffff' : '#1d2d3e',
                 boxShadow: '0 1px 4px rgba(0,0,0,0.10)',
                 whiteSpace: 'pre-wrap',
                 fontSize: '0.875rem',
