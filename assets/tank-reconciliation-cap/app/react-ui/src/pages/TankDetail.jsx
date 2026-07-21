@@ -105,6 +105,7 @@ export default function TankDetail() {
                   <th>Book Stock ({tanks[0]?.uom || 'TO'})</th>
                   <th>Physical ({tanks[0]?.uom || 'TO'})</th>
                   <th>Delta ({tanks[0]?.uom || 'TO'})</th>
+                  <th>UoM</th>
                   <th>Delta %</th>
                   <th>Classification</th>
                   <th>Posting Status</th>
@@ -125,6 +126,7 @@ export default function TankDetail() {
                         {t.delta != null ? (t.delta >= 0 ? '+' : '') + t.delta.toFixed(2) : '–'}
                       </span>
                     </td>
+                    <td><strong>{t.uom || 'TO'}</strong></td>
                     <td>
                       <DeltaBar pct={t.deltaPercent} />
                     </td>
