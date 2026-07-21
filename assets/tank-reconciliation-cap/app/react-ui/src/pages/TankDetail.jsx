@@ -100,9 +100,11 @@ export default function TankDetail() {
                 <tr>
                   <th>Tank ID</th>
                   <th>Name</th>
-                  <th>Book Stock (L)</th>
-                  <th>Physical (L)</th>
-                  <th>Delta (L)</th>
+                  <th>Plant</th>
+                  <th>SLOC</th>
+                  <th>Book Stock ({tanks[0]?.uom || 'TO'})</th>
+                  <th>Physical ({tanks[0]?.uom || 'TO'})</th>
+                  <th>Delta ({tanks[0]?.uom || 'TO'})</th>
                   <th>Delta %</th>
                   <th>Classification</th>
                   <th>Posting Status</th>
@@ -114,6 +116,8 @@ export default function TankDetail() {
                   <tr key={t.ID} className={t.classification === 'URGENT' ? 'urgent-row' : ''}>
                     <td><strong>{t.tankId}</strong></td>
                     <td>{t.tankName || '–'}</td>
+                    <td>{t.plant || '–'}</td>
+                    <td>{t.storageLocation || '–'}</td>
                     <td>{t.bookStock?.toLocaleString() ?? '–'}</td>
                     <td>{t.netVolumePhysical?.toLocaleString() ?? '–'}</td>
                     <td>

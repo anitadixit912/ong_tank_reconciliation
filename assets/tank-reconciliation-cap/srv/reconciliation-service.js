@@ -255,6 +255,8 @@ async function _runInlineReconciliation(runId, runDate, actor) {
         tankName: tank.tankName,
         materialId: tank.materialId,
         plant: tank.plant,
+        storageLocation: tank.storageLocation || '',
+        uom: dipData ? dipData.uom : 'TO',
         grossVolumeObserved,
         netVolumePhysical,
         bookStock,

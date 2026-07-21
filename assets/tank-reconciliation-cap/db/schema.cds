@@ -56,6 +56,8 @@ entity TankResult : cuid {
   tankName           : String(100);
   materialId         : String(40);
   plant              : String(10);
+  storageLocation    : String(10);
+  uom                : String(3);
   grossVolumeObserved: Decimal(15,3);
   temperature        : Decimal(7,3);
   strappingFactor    : Decimal(10,6);
@@ -102,6 +104,7 @@ entity TankConfiguration {
   tankName           : String(100)  @mandatory;
   materialId         : String(40);
   plant              : String(10);
+  storageLocation    : String(10);
   toleranceOkPct     : Decimal(5,2) default 0.10;
   toleranceFlagPct   : Decimal(5,2) default 0.25;
   atgEndpoint        : String(500);
