@@ -93,10 +93,10 @@ export default function ApprovalQueue() {
                     <th>Run Date</th>
                     <th>Tank ID</th>
                     <th>Tank Name</th>
-                    <th>Delta (L)</th>
+                    <th>Delta ({items[0]?.uom || 'TO'})</th>
                     <th>Delta %</th>
-                    <th>Book Stock</th>
-                    <th>Physical</th>
+                    <th>Book Stock ({items[0]?.uom || 'TO'})</th>
+                    <th>Physical ({items[0]?.uom || 'TO'})</th>
                     <th>Action</th>
                   </tr>
                 </thead>
@@ -147,16 +147,16 @@ export default function ApprovalQueue() {
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
                 <div>
                   <div className="form-label">Book Stock</div>
-                  <div>{selected.bookStock?.toLocaleString() ?? '–'} L</div>
+                  <div>{selected.bookStock?.toLocaleString() ?? '–'} {selected.uom || 'TO'}</div>
                 </div>
                 <div>
                   <div className="form-label">Physical</div>
-                  <div>{selected.netVolumePhysical?.toLocaleString() ?? '–'} L</div>
+                  <div>{selected.netVolumePhysical?.toLocaleString() ?? '–'} {selected.uom || 'TO'}</div>
                 </div>
                 <div>
                   <div className="form-label">Delta</div>
                   <span className="delta-urgent">
-                    {selected.delta != null ? (selected.delta >= 0 ? '+' : '') + selected.delta.toFixed(2) : '–'} L
+                    {selected.delta != null ? (selected.delta >= 0 ? '+' : '') + selected.delta.toFixed(2) : '–'} {selected.uom || 'TO'}
                   </span>
                 </div>
                 <div>

@@ -19,14 +19,25 @@ const SUGGESTIONS = [
   'Give me a summary of today\'s results.'
 ];
 
+const INITIAL_MESSAGE = { role: 'assistant', text: 'Hello! I\'m your Tank Reconciliation Assistant. Ask me about variance results, tank status, or pending approvals.' };
+const SESSION_KEY = 'tank_recon_chat_history';
+
 export default function AiChat() {
-  const [messages, setMessages]   = useState([
-    { role: 'assistant', text: 'Hello! I\'m your Tank Reconciliation Assistant. Ask me about variance results, tank status, or pending approvals.' }
-  ]);
+  const [messages, setMessages] = useState(() => {
+    try {
+      const saved = sessionStorage.getItem(SESSION_KEY);
+      return saved ? JSON.parse(saved) : [INITIAL_MESSAGE];
+    } catch (_) { return [INITIAL_MESSAGE]; }
+  });
   const [input, setInput]         = useState('');
   const [loading, setLoading]     = useState(false);
   const [sessionId]               = useState(() => crypto.randomUUID());
   const bottomRef                 = useRef(null);
+
+  // Save messages to sessionStorage whenever they change
+  useEffect(() => {
+    try { sessionStorage.setItem(SESSION_KEY, JSON.stringify(messages)); } catch (_) {}
+  }, [messages]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -65,11 +76,25 @@ export default function AiChat() {
 
   return (
     <FlexBox direction="Column" style={{ height: 'calc(100vh - 120px)', padding: '1rem', gap: '1rem' }}>
-      <Title level="H3">AI Reconciliation Assistant</Title>
+      <FlexBox direction="Row" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
+        <Title level="H3">AI Reconciliation Assistant</Title>
+        <Button design="Transparent" style={{ fontSize: '0.8rem', color: '#888' }}
+          onClick={() => { setMessages([INITIAL_MESSAGE]); sessionStorage.removeItem(SESSION_KEY); }}>
+          🗑 Clear Chat
+        </Button>
+      </FlexBox>
 
       {/* Chat window */}
-      <Card style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-        <div style={{ flex: 1, overflowY: 'auto', padding: '1rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+      <div style={{
+        flex: 1, minHeight: 0, overflow: 'hidden',
+        display: 'flex', flexDirection: 'column',
+        border: '1px solid #dde', borderRadius: '8px',
+        background: '#fff', boxShadow: '0 1px 4px rgba(0,0,0,0.06)'
+      }}>
+        <div style={{
+          flex: 1, minHeight: 0, overflowY: 'auto',
+          padding: '1rem', display: 'flex', flexDirection: 'column', gap: '0.75rem'
+        }}>
           {messages.map((msg, i) => (
             <FlexBox
               key={i}
@@ -110,7 +135,7 @@ export default function AiChat() {
           )}
           <div ref={bottomRef} />
         </div>
-      </Card>
+      </div>
 
       {/* Suggestions */}
       <FlexBox direction="Row" wrap="Wrap" style={{ gap: '0.5rem' }}>

@@ -563,14 +563,20 @@ module.exports = class ReconciliationService extends cds.ApplicationService {
       if (latestRun) {
         tanks   = await SELECT.from('tank.reconciliation.TankResult')
           .where({ run_ID: latestRun.ID }).orderBy({ deltaPercent: 'desc' });
-        const urgent  = tanks.filter(t => t.classification === 'URGENT');
-        const flagged = tanks.filter(t => t.classification === 'FLAG');
+        const urgent       = tanks.filter(t => t.classification === 'URGENT');
+        const flagged      = tanks.filter(t => t.classification === 'FLAG');
+        const pendingCount = tanks.filter(t => t.classification === 'URGENT' && t.postingStatus === 'PENDING').length;
+        const approvedCount = tanks.filter(t => t.postingStatus === 'POSTED').length;
+        const rejectedCount = tanks.filter(t => t.postingStatus === 'REJECTED').length;
 
         tankSummary = [
           'Latest run: ' + latestRun.runDate + ' (status: ' + latestRun.status + ')',
-          'Tanks: ' + (latestRun.tankCount || 0) + ' total — OK: ' + (latestRun.okCount || 0) + ', FLAG: ' + (latestRun.flagCount || 0) + ', URGENT: ' + (latestRun.urgentCount || 0),
-          urgent.length  ? 'URGENT tanks: '  + urgent.map(t  => t.tankId + ' (' + t.deltaPercent + '%)').join(', ') : '',
-          flagged.length ? 'Flagged tanks: ' + flagged.map(t => t.tankId + ' (' + t.deltaPercent + '%)').join(', ') : ''
+          'Tanks: ' + (latestRun.tankCount || 0) + ' total — OK: ' + (latestRun.okCount || 0) + ', FLAG: ' + (latestRun.flagCount || 0) + ', URGENT: ' + urgent.length,
+          pendingCount > 0  ? 'Pending approval: ' + pendingCount + ' tank(s)' : '',
+          approvedCount > 0 ? 'Approved/Posted: ' + approvedCount + ' tank(s)' : '',
+          rejectedCount > 0 ? 'Rejected: ' + rejectedCount + ' tank(s)' : '',
+          urgent.length  ? 'URGENT tanks: '  + urgent.map(t  => t.tankId + ' (' + parseFloat(t.deltaPercent).toFixed(2) + '%) [' + t.postingStatus + ']').join(', ') : '',
+          flagged.length ? 'Flagged tanks: ' + flagged.map(t => t.tankId + ' (' + parseFloat(t.deltaPercent).toFixed(2) + '%)').join(', ') : ''
         ].filter(Boolean).join('\n');
 
         sources = 'Run ' + latestRun.runDate;
@@ -797,10 +803,17 @@ function _fallbackReply(message, latestRun, tankSummary, tanks) {
 
   tanks = tanks || [];
 
-  // Check if asking about a specific tank by SOCNR
-  const socnrMatch = message.match(/\b0{15,}\d+\b/);
-  const specificTankId = socnrMatch ? socnrMatch[0] : null;
-  const specificTank = specificTankId ? tanks.find(t => t.tankId === specificTankId) : null;
+  // Check if asking about a specific tank by SOCNR (any length) or by tank name
+  const socnrMatch = message.match(/\b0+\d+\b/);
+  const specificTankId = socnrMatch ? socnrMatch[0].padStart(20, '0') : null;
+
+  // Also match by tank name e.g. USMOB-17T1, USMOB-17T2
+  const nameMatch = message.match(/USMOB-\w+/i);
+  const specificTank = specificTankId
+    ? tanks.find(t => t.tankId === specificTankId || t.tankId.endsWith(specificTankId.replace(/^0+/, '')))
+    : nameMatch
+      ? tanks.find(t => t.tankName && t.tankName.toUpperCase().includes(nameMatch[0].toUpperCase()))
+      : null;
 
   // Recommendation logic — data-driven, not hallucinated
   if (q.includes('recommend') || q.includes('advice') || q.includes('suggest') || q.includes('what should') || q.includes('what do')) {
@@ -811,6 +824,25 @@ function _fallbackReply(message, latestRun, tankSummary, tanks) {
       const book   = parseFloat(specificTank.bookStock || 0);
       const name   = specificTank.tankName || specificTankId;
       const cls    = specificTank.classification;
+      const status = specificTank.postingStatus || 'PENDING';
+
+      // If already actioned — show current status
+      if (status === 'REJECTED') {
+        return `**Status for ${name} (${specificTankId}):**\n\n` +
+          `✗ This posting has already been **REJECTED**.\n` +
+          `Variance: ${pct.toFixed(2)}% — Physical: ${phys.toFixed(3)} TO, Book: ${book.toFixed(3)} TO\n\n` +
+          `The rejection is recorded in the audit trail. To reconcile this tank correctly:\n` +
+          `1. Record a fresh dip in **O4_TIGER** with the current actual measurement\n` +
+          `2. Trigger a new reconciliation run\n` +
+          `3. The new run will show the corrected variance`;
+      }
+
+      if (status === 'POSTED') {
+        return `**Status for ${name} (${specificTankId}):**\n\n` +
+          `✓ This posting has been **APPROVED and POSTED**.\n` +
+          `Variance: ${pct.toFixed(2)}% — Material Document: ${specificTank.materialDocumentId || 'see audit trail'}\n\n` +
+          `No further action required for this tank in the current run.`;
+      }
 
       if (cls === 'URGENT' && pct > 500) {
         return `**Recommendation for ${name} (${specificTankId}):**\n\n` +
@@ -851,8 +883,8 @@ function _fallbackReply(message, latestRun, tankSummary, tanks) {
       `\n\nGo to **✅ Approval Queue** to review each one.`;
   }
 
-  // Specific tank status query
-  if (specificTank) {
+  // Specific tank status query — show status if NOT asking for recommendation
+  if (specificTank && !q.includes('recommend') && !q.includes('advice') && !q.includes('suggest') && !q.includes('what should')) {
     const pct = parseFloat(specificTank.deltaPercent || 0);
     return `**${specificTank.tankName || specificTankId}** (${specificTankId}):\n` +
       `- Classification: **${specificTank.classification}**\n` +
@@ -863,34 +895,60 @@ function _fallbackReply(message, latestRun, tankSummary, tanks) {
       `- VCF Source: ${specificTank.vcfSource || 'N/A'}`;
   }
 
-  // Standard queries
+  // Standard queries — each gives a different focused answer
   if (q.includes('urgent') || q.includes('critical')) {
     const urgentTanks = tanks.filter(t => t.classification === 'URGENT');
-    return latestRun.urgentCount > 0
-      ? `**${latestRun.urgentCount} URGENT** variance(s) in run ${latestRun.runDate}:\n\n` +
-        urgentTanks.map(t => `- ${t.tankName || t.tankId}: **${parseFloat(t.deltaPercent).toFixed(2)}%**`).join('\n') +
-        `\n\nGo to **✅ Approval Queue** to approve or reject.`
-      : `No URGENT variances in the latest run (${latestRun.runDate}).`;
+    const pendingTanks = urgentTanks.filter(t => t.postingStatus === 'PENDING');
+    if (urgentTanks.length === 0) return `No URGENT variances in the latest run (${latestRun.runDate}).`;
+    return `**URGENT variances in run ${latestRun.runDate}:**\n\n` +
+      urgentTanks.map(t => `- **${t.tankName || t.tankId}**: ${parseFloat(t.deltaPercent).toFixed(2)}% [${t.postingStatus}]`).join('\n') +
+      (pendingTanks.length > 0 ? `\n\n${pendingTanks.length} tank(s) still pending approval. Go to **✅ Approval Queue**.` : '\n\nAll URGENT tanks have been actioned.');
   }
 
-  if (q.includes('approve') || q.includes('approval'))
-    return latestRun.urgentCount > 0
-      ? `**${latestRun.urgentCount} tank(s)** require approval. Go to **✅ Approval Queue** in the sidebar.`
-      : `No tanks currently require approval.`;
+  if (q.includes('flag')) {
+    const flaggedTanks = tanks.filter(t => t.classification === 'FLAG');
+    if (flaggedTanks.length === 0) return `No FLAG variances in the latest run (${latestRun.runDate}). All tanks are either OK or URGENT.`;
+    return `**FLAG variances in run ${latestRun.runDate}:**\n\n` +
+      flaggedTanks.map(t => `- **${t.tankName || t.tankId}**: ${parseFloat(t.deltaPercent).toFixed(2)}% — auto-posted`).join('\n') +
+      `\n\nFLAG tanks post automatically but are worth monitoring.`;
+  }
 
-  if (q.includes('status') || q.includes('latest') || q.includes('summary') || q.includes('overview'))
+  if (q.includes('approve') || q.includes('approval') || q.includes('pending')) {
+    const pendingTanks = tanks.filter(t => t.classification === 'URGENT' && t.postingStatus === 'PENDING');
+    if (pendingTanks.length === 0) return `No tanks currently require approval. All URGENT variances have been actioned.`;
+    return `**${pendingTanks.length} tank(s) pending approval:**\n\n` +
+      pendingTanks.map(t => `- **${t.tankName || t.tankId}**: ${parseFloat(t.deltaPercent).toFixed(2)}%`).join('\n') +
+      `\n\nGo to **✅ Approval Queue** in the sidebar to approve or reject.`;
+  }
+
+  if (q.includes('status') || q.includes('latest') || q.includes('last') || q.includes('overview'))
     return `**Latest Reconciliation (${latestRun.runDate}):**\n\n${tankSummary}`;
+
+  if (q.includes('summar') || q.includes('today') || q.includes('result')) {
+    const pendingCount  = tanks.filter(t => t.classification === 'URGENT' && t.postingStatus === 'PENDING').length;
+    const rejectedCount = tanks.filter(t => t.postingStatus === 'REJECTED').length;
+    const postedCount   = tanks.filter(t => t.postingStatus === 'POSTED').length;
+    return `**Run Summary — ${latestRun.runDate}:**\n\n` +
+      `- Total tanks: **${latestRun.tankCount || 0}**\n` +
+      `- OK: **${latestRun.okCount || 0}**\n` +
+      `- FLAG: **${latestRun.flagCount || 0}** (auto-posted)\n` +
+      `- URGENT: **${tanks.filter(t => t.classification === 'URGENT').length}**\n` +
+      (pendingCount  > 0 ? `  - Pending approval: **${pendingCount}**\n` : '') +
+      (rejectedCount > 0 ? `  - Rejected: **${rejectedCount}**\n` : '') +
+      (postedCount   > 0 ? `  - Posted: **${postedCount}**\n` : '') +
+      `\nRun completed at ${latestRun.completedAt ? new Date(latestRun.completedAt).toLocaleTimeString() : 'N/A'}`;
+  }
 
   if (q.includes('audit') || q.includes('history'))
     return `Click **📋 Audit Trail** in the sidebar to see the full M1→M6 milestone history.`;
 
-  if (q.includes('trigger') || q.includes('run') || q.includes('start'))
+  if (q.includes('trigger') || q.includes('start new'))
     return `Go to the **Dashboard**, select a date, and click **⚡ Trigger Run** to start a reconciliation.`;
 
   return `**Latest (${latestRun.runDate}):**\n\n${tankSummary}\n\nTry asking:\n` +
     `- "Recommendation for tank 00000000000000000023"\n` +
     `- "Which tanks need approval?"\n` +
-    `- "Show me the status summary"`;
+    `- "Give me a summary of today's results"`;
 }
 
 // ── Webhook fire-and-forget ───────────────────────────────────────────────────

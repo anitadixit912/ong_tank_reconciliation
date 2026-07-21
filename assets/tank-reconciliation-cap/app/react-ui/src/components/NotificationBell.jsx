@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { fetchRuns } from '../api.js';
+import { useNavigate } from 'react-router-dom';
+import { fetchRuns, fetchPendingApprovals } from '../api.js';
 
 export default function NotificationBell() {
+  const navigate = useNavigate();
   const [open, setOpen]               = useState(false);
   const [notifications, setNotifications] = useState([]);
   const [unread, setUnread]           = useState(0);
@@ -12,20 +14,33 @@ export default function NotificationBell() {
 
   const load = useCallback(async () => {
     try {
-      const runs = await fetchRuns({ top: 10 });
+      const [runs, pending] = await Promise.all([
+        fetchRuns({ top: 10 }),
+        fetchPendingApprovals()
+      ]);
+
+      // Build pending count per run
+      const pendingByRun = {};
+      pending.forEach(t => {
+        pendingByRun[t.run_ID] = (pendingByRun[t.run_ID] || 0) + 1;
+      });
+
       const notes = runs.map(r => ({
-        id:        r.ID,
-        runDate:   r.runDate,
-        status:    r.status,
-        tankCount: r.tankCount || 0,
-        okCount:   r.okCount   || 0,
-        flagCount: r.flagCount || 0,
-        urgentCount: r.urgentCount || 0,
-        triggeredAt: r.triggeredAt,
+        id:           r.ID,
+        runDate:      r.runDate,
+        status:       r.status,
+        tankCount:    r.tankCount || 0,
+        okCount:      r.okCount   || 0,
+        flagCount:    r.flagCount || 0,
+        urgentCount:  r.urgentCount || 0,
+        pendingCount: pendingByRun[r.ID] || 0,
+        triggeredAt:  r.triggeredAt,
       })).filter(r => r.status === 'COMPLETED' || r.status === 'FAILED');
+
       setNotifications(notes);
-      const newCount = notes.filter(n => n.triggeredAt > lastSeen).length;
-      setUnread(newCount);
+      // Unread = runs with still-pending approvals or new runs since last seen
+      const newCount = notes.filter(n => n.triggeredAt > lastSeen || n.pendingCount > 0).length;
+      setUnread(pending.length); // show actual pending approval count
     } catch (_) {}
   }, [lastSeen]);
 
@@ -60,15 +75,16 @@ export default function NotificationBell() {
 
   function statusEmoji(r) {
     if (r.status === 'FAILED') return '⛔';
-    if (r.urgentCount > 0)     return '🔴';
+    if (r.pendingCount > 0)    return '🔴';
+    if (r.urgentCount > 0)     return '🟡';
     if (r.flagCount > 0)       return '🟡';
     return '🟢';
   }
 
   function statusColor(r) {
     if (r.status === 'FAILED') return '#bb0000';
-    if (r.urgentCount > 0)     return '#bb0000';
-    if (r.flagCount > 0)       return '#e76e00';
+    if (r.pendingCount > 0)    return '#bb0000';
+    if (r.urgentCount > 0)     return '#e76e00';
     return '#188425';
   }
 
@@ -124,17 +140,31 @@ export default function NotificationBell() {
                 No completed runs yet
               </div>
             ) : notifications.map((n, i) => (
-              <div key={n.id} style={{
-                padding: '0.75rem 1rem',
-                borderBottom: i < notifications.length - 1 ? '1px solid #f0f0f0' : 'none',
-                background: n.triggeredAt > lastSeen && i < unread ? '#fffbf0' : '#fff'
-              }}>
+              <div key={n.id}
+                onClick={() => {
+                  setOpen(false);
+                  if (n.urgentCount > 0) {
+                    navigate('/approvals');
+                  } else {
+                    navigate(`/runs/${n.id}`);
+                  }
+                }}
+                style={{
+                  padding: '0.75rem 1rem',
+                  borderBottom: i < notifications.length - 1 ? '1px solid #f0f0f0' : 'none',
+                  background: n.triggeredAt > lastSeen && i < unread ? '#fffbf0' : '#fff',
+                  cursor: 'pointer'
+                }}
+                onMouseEnter={e => e.currentTarget.style.background = '#f5f8ff'}
+                onMouseLeave={e => e.currentTarget.style.background = n.triggeredAt > lastSeen && i < unread ? '#fffbf0' : '#fff'}
+              >
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.3rem' }}>
                   <span style={{ fontWeight: 700, fontSize: '0.9rem', color: statusColor(n) }}>
                     {statusEmoji(n)} Run {n.runDate}
                   </span>
-                  <span style={{ fontSize: '0.75rem', color: '#888' }}>
+                  <span style={{ fontSize: '0.75rem', color: '#888', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
                     {n.triggeredAt ? new Date(n.triggeredAt).toLocaleTimeString() : ''}
+                    <span style={{ color: '#0070f2' }}>›</span>
                   </span>
                 </div>
                 <div style={{ fontSize: '0.82rem', color: '#444', lineHeight: 1.6 }}>
@@ -143,12 +173,12 @@ export default function NotificationBell() {
                   {n.flagCount > 0 && <span style={{ marginRight: '0.5rem', color: '#e76e00' }}>⚑ {n.flagCount} FLAG</span>}
                   {n.urgentCount > 0 && <span style={{ color: '#bb0000' }}>⚡ {n.urgentCount} URGENT</span>}
                 </div>
-                {n.urgentCount > 0 && (
+                {n.pendingCount > 0 && (
                   <div style={{
                     marginTop: '0.4rem', fontSize: '0.78rem', color: '#bb0000',
                     background: '#fff0f0', padding: '0.25rem 0.5rem', borderRadius: '4px'
                   }}>
-                    ⚠️ Approval required for {n.urgentCount} tank{n.urgentCount > 1 ? 's' : ''}
+                    ⚠️ {n.pendingCount} tank{n.pendingCount > 1 ? 's' : ''} pending approval → click to review
                   </div>
                 )}
               </div>
