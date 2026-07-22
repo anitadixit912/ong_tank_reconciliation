@@ -268,7 +268,7 @@ async function _runInlineReconciliation(runId, runDate, actor) {
           + ' vcfFactor=' + vcfFactor.toFixed(6)
           + ' netVolume=' + netVolumePhysical.toFixed(3)
           + ' source=' + vcfSource2
-          + (vcfSource2 === 'ASTM_FALLBACK' ? ' (VCF_API_URL not configured — using factor 1.0)' : ''),
+          + (vcfSource2 === 'ASTM_FALLBACK' ? ' (VCF_API_URL not configured — QUAN_SKU already VCF-corrected by IS-OIL, factor 1.0 is correct)' : ''),
         timestamp: new Date().toISOString(), actor
       });
 

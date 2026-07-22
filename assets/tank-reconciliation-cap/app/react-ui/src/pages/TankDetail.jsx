@@ -131,7 +131,14 @@ export default function TankDetail() {
                       <DeltaBar pct={t.deltaPercent} />
                     </td>
                     <td><StatusBadge value={t.classification} /></td>
-                    <td><StatusBadge value={t.postingStatus} /></td>
+                    <td>
+                      <StatusBadge value={t.postingStatus} />
+                      {t.postingStatus === 'FAILED' && (t.classification === 'GREEN' || t.classification === 'AMBER') && (
+                        <div style={{ fontSize: '0.7rem', color: '#888', marginTop: '0.2rem' }}>
+                          IS-OIL config pending
+                        </div>
+                      )}
+                    </td>
                     <td>{t.materialDocNumber
                       ? <a href={`${import.meta.env.VITE_S4_URL || '#'}/Material/${t.materialDocNumber}`}
                            target="_blank" rel="noreferrer" style={{ color: '#0070f3' }}>
