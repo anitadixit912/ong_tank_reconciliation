@@ -75,7 +75,7 @@ export async function fetchTankResults(runId) {
 
 export async function fetchPendingApprovals() {
   var qp = odataParams({
-    '$filter': "classification eq 'URGENT' and postingStatus eq 'PENDING'",
+    '$filter': "classification eq 'RED' and postingStatus eq 'PENDING'",
     '$expand': 'run',
     '$orderby': 'run/runDate desc'
   });

@@ -115,12 +115,13 @@ async function _postTankDip(socnr, etmstm, quanSku, relstock, meins) {
     cds.log('s4').info('_postTankDip POST status=' + res.status);
 
     if (res.status === 201 || res.status === 200) {
+      cds.log('s4').info('_postTankDip response body: ' + res.body.slice(0, 500));
       const payload = JSON.parse(res.body);
       const d = payload.d || {};
       return {
         success:          true,
-        materialDocument: d.MaterialDocument || '',
-        message:          d.PostingResult || 'Posting completed'
+        materialDocument: d.MaterialDocument || d.Materialdocument || '',
+        message:          d.PostingResult || d.Postingresult || 'Posting completed'
       };
     } else {
       let errMsg = 'HTTP ' + res.status;
@@ -240,13 +241,17 @@ async function _runInlineReconciliation(runId, runDate, actor) {
       const delta        = netVolumePhysical - bookStock;
       const deltaPercent = bookStock > 0 ? Math.abs(delta / bookStock) * 100 : 0;
 
-      let classification = 'OK';
-      if      (deltaPercent > (tank.toleranceFlagPct || 0.25)) classification = 'URGENT';
-      else if (deltaPercent > (tank.toleranceOkPct  || 0.10)) classification = 'FLAG';
+      // Threshold classification:
+      // GREEN  = delta ≤ 0.5%  (within tolerance)
+      // AMBER  = delta 0.5% – 2%  (flag, monitor)
+      // RED    = delta > 2%  (urgent, requires approval)
+      let classification = 'GREEN';
+      if      (deltaPercent > (tank.toleranceFlagPct || 2.00)) classification = 'RED';
+      else if (deltaPercent > (tank.toleranceOkPct  || 0.50)) classification = 'AMBER';
 
-      if      (classification === 'OK')     okCount++;
-      else if (classification === 'FLAG')   flagCount++;
-      else if (classification === 'URGENT') urgentCount++;
+      if      (classification === 'GREEN') okCount++;
+      else if (classification === 'AMBER') flagCount++;
+      else if (classification === 'RED')   urgentCount++;
 
       await INSERT.into('tank.reconciliation.TankResult').entries({
         ID: cds.utils.uuid(),
@@ -265,7 +270,7 @@ async function _runInlineReconciliation(runId, runDate, actor) {
         classification,
         toleranceOkPct:   tank.toleranceOkPct  || 0.10,
         toleranceFlagPct: tank.toleranceFlagPct || 0.25,
-        postingStatus:    'PENDING',
+        postingStatus:    classification === 'RED' ? 'PENDING' : 'AUTO_POSTING',
         vcfSource: vcfSource2,
         vcfFactor
       });
@@ -282,6 +287,44 @@ async function _runInlineReconciliation(runId, runDate, actor) {
           + ' source=' + s4Source,
         timestamp: new Date().toISOString(), actor
       });
+
+      // M5: Auto-post GREEN and AMBER — only RED requires supervisor approval
+      if (classification === 'GREEN' || classification === 'AMBER') {
+        const postResult = await _postTankDip(
+          tank.tankId,
+          dipData ? dipData.timestamp : '',
+          netVolumePhysical,
+          bookStock,
+          dipData ? dipData.uom : 'TO'
+        );
+
+        const resultId2 = cds.utils.uuid();
+        if (postResult.success) {
+          await UPDATE('tank.reconciliation.TankResult').set({
+            postingStatus: 'POSTED',
+            materialDocumentId: postResult.materialDocument
+          }).where({ run_ID: runId, tankId: tank.tankId });
+
+          await INSERT.into('tank.reconciliation.AuditLogEntry').entries({
+            ID: resultId2, run_ID: runId, tankId: tank.tankId,
+            step: 'POSTING', milestone: 'M5', outcome: 'ACHIEVED',
+            message: 'M5.auto-posted: ' + classification + ' variance auto-posted — doc=' + postResult.materialDocument,
+            timestamp: new Date().toISOString(), actor
+          });
+        } else {
+          await UPDATE('tank.reconciliation.TankResult').set({
+            postingStatus: 'FAILED',
+            rejectionReason: postResult.message
+          }).where({ run_ID: runId, tankId: tank.tankId });
+
+          await INSERT.into('tank.reconciliation.AuditLogEntry').entries({
+            ID: resultId2, run_ID: runId, tankId: tank.tankId,
+            step: 'POSTING', milestone: 'M5', outcome: 'FAILED',
+            message: 'M5.auto-post failed: ' + postResult.message,
+            timestamp: new Date().toISOString(), actor
+          });
+        }
+      }
     }
 
     await UPDATE('tank.reconciliation.ReconciliationRun', runId).with({
@@ -309,13 +352,29 @@ async function _runInlineReconciliation(runId, runDate, actor) {
 // ── M6: Alert & Report Distribution ──────────────────────────────────────────
 
 async function _sendM6Notifications(runId, runDate, tankCount, okCount, flagCount, urgentCount) {
-  const status = urgentCount > 0 ? 'URGENT' : (flagCount > 0 ? 'FLAG' : 'OK');
-  const emoji  = status === 'URGENT' ? '🔴' : (status === 'FLAG' ? '🟡' : '🟢');
+  const status = urgentCount > 0 ? 'RED' : (flagCount > 0 ? 'AMBER' : 'GREEN');
+  const emoji  = status === 'RED' ? '🔴' : (status === 'AMBER' ? '🟡' : '🟢');
 
   const summary = `${emoji} Tank Reconciliation Run — ${runDate}\n`
     + `Status: ${status}\n`
-    + `Tanks: ${tankCount} total | OK: ${okCount} | FLAG: ${flagCount} | URGENT: ${urgentCount}\n`
+    + `Tanks: ${tankCount} total | GREEN: ${okCount} | AMBER: ${flagCount} | RED: ${urgentCount}\n`
     + `Run ID: ${runId}`;
+
+  const teamsPayload = JSON.stringify({
+    text: summary,
+    title: `Tank Reconciliation — ${runDate}`,
+    themeColor: status === 'RED' ? 'FF0000' : (status === 'AMBER' ? 'FFA500' : '00CC00'),
+    sections: [{
+      activityTitle: `Run ${runDate}`,
+      facts: [
+        { name: 'Status',  value: status },
+        { name: 'Total Tanks', value: String(tankCount) },
+        { name: '🟢 GREEN',   value: String(okCount) },
+        { name: '🟡 AMBER',   value: String(flagCount) },
+        { name: '🔴 RED',     value: String(urgentCount) }
+      ]
+    }]
+  });
 
   // 1. MS Teams / Generic Webhook
   const teamsUrl = process.env.TEAMS_WEBHOOK_URL;
@@ -422,7 +481,7 @@ module.exports = class ReconciliationService extends cds.ApplicationService {
 
       const result = await SELECT.one.from('tank.reconciliation.TankResult').where({ ID: tankResultId });
       if (!result) return req.reject(404, 'TankResult not found');
-      if (result.classification !== 'URGENT') return req.reject(400, 'Only URGENT tanks require approval');
+      if (result.classification !== 'RED') return req.reject(400, 'Only URGENT tanks require approval');
       if (result.postingStatus  !== 'PENDING') return req.reject(409, 'Tank is already in status: ' + result.postingStatus);
 
       const now       = new Date().toISOString();
@@ -490,7 +549,7 @@ module.exports = class ReconciliationService extends cds.ApplicationService {
 
       const result = await SELECT.one.from('tank.reconciliation.TankResult').where({ ID: tankResultId });
       if (!result) return req.reject(404, 'TankResult not found');
-      if (result.classification !== 'URGENT') return req.reject(400, 'Only URGENT tanks require approval');
+      if (result.classification !== 'RED') return req.reject(400, 'Only URGENT tanks require approval');
       if (result.postingStatus  !== 'PENDING') return req.reject(409, 'Tank is already in status: ' + result.postingStatus);
 
       const now       = new Date().toISOString();
@@ -563,9 +622,9 @@ module.exports = class ReconciliationService extends cds.ApplicationService {
       if (latestRun) {
         tanks   = await SELECT.from('tank.reconciliation.TankResult')
           .where({ run_ID: latestRun.ID }).orderBy({ deltaPercent: 'desc' });
-        const urgent       = tanks.filter(t => t.classification === 'URGENT');
+        const urgent       = tanks.filter(t => t.classification === 'RED');
         const flagged      = tanks.filter(t => t.classification === 'FLAG');
-        const pendingCount = tanks.filter(t => t.classification === 'URGENT' && t.postingStatus === 'PENDING').length;
+        const pendingCount = tanks.filter(t => t.classification === 'RED' && t.postingStatus === 'PENDING').length;
         const approvedCount = tanks.filter(t => t.postingStatus === 'POSTED').length;
         const rejectedCount = tanks.filter(t => t.postingStatus === 'REJECTED').length;
 
@@ -844,7 +903,7 @@ function _fallbackReply(message, latestRun, tankSummary, tanks) {
           `No further action required for this tank in the current run.`;
       }
 
-      if (cls === 'URGENT' && pct > 500) {
+      if (cls === 'RED' && pct > 500) {
         return `**Recommendation for ${name} (${specificTankId}):**\n\n` +
           `⚠️ Variance: **${pct.toFixed(2)}%** — Physical: ${phys.toFixed(3)} TO, Book: ${book.toFixed(3)} TO, Delta: ${delta.toFixed(3)} TO\n\n` +
           `This extremely large variance (>${pct.toFixed(0)}%) is almost certainly a **data quality issue**, not a physical stock loss:\n\n` +
@@ -854,7 +913,7 @@ function _fallbackReply(message, latestRun, tankSummary, tanks) {
           `**Action: Reject this posting** and ask the terminal operator to record a fresh dip in O4_TIGER.`;
       }
 
-      if (cls === 'URGENT' && pct <= 500) {
+      if (cls === 'RED' && pct <= 500) {
         return `**Recommendation for ${name} (${specificTankId}):**\n\n` +
           `Variance: **${pct.toFixed(2)}%** — Physical: ${phys.toFixed(3)} TO, Book: ${book.toFixed(3)} TO, Delta: ${delta.toFixed(3)} TO\n\n` +
           `This variance exceeds the FLAG threshold (${specificTank.toleranceFlagPct || 0.25}%).\n\n` +
@@ -876,7 +935,7 @@ function _fallbackReply(message, latestRun, tankSummary, tanks) {
     }
 
     // General recommendation
-    const urgentTanks = tanks.filter(t => t.classification === 'URGENT');
+    const urgentTanks = tanks.filter(t => t.classification === 'RED');
     if (urgentTanks.length === 0) return `All tanks are within tolerance in the latest run (${latestRun.runDate}). No action required.`;
     return `**${urgentTanks.length} URGENT tank(s)** require attention:\n\n` +
       urgentTanks.map(t => `- **${t.tankName || t.tankId}**: ${parseFloat(t.deltaPercent).toFixed(2)}% variance`).join('\n') +
@@ -897,7 +956,7 @@ function _fallbackReply(message, latestRun, tankSummary, tanks) {
 
   // Standard queries — each gives a different focused answer
   if (q.includes('urgent') || q.includes('critical')) {
-    const urgentTanks = tanks.filter(t => t.classification === 'URGENT');
+    const urgentTanks = tanks.filter(t => t.classification === 'RED');
     const pendingTanks = urgentTanks.filter(t => t.postingStatus === 'PENDING');
     if (urgentTanks.length === 0) return `No URGENT variances in the latest run (${latestRun.runDate}).`;
     return `**URGENT variances in run ${latestRun.runDate}:**\n\n` +
@@ -914,7 +973,7 @@ function _fallbackReply(message, latestRun, tankSummary, tanks) {
   }
 
   if (q.includes('approve') || q.includes('approval') || q.includes('pending')) {
-    const pendingTanks = tanks.filter(t => t.classification === 'URGENT' && t.postingStatus === 'PENDING');
+    const pendingTanks = tanks.filter(t => t.classification === 'RED' && t.postingStatus === 'PENDING');
     if (pendingTanks.length === 0) return `No tanks currently require approval. All URGENT variances have been actioned.`;
     return `**${pendingTanks.length} tank(s) pending approval:**\n\n` +
       pendingTanks.map(t => `- **${t.tankName || t.tankId}**: ${parseFloat(t.deltaPercent).toFixed(2)}%`).join('\n') +
@@ -925,14 +984,14 @@ function _fallbackReply(message, latestRun, tankSummary, tanks) {
     return `**Latest Reconciliation (${latestRun.runDate}):**\n\n${tankSummary}`;
 
   if (q.includes('summar') || q.includes('today') || q.includes('result')) {
-    const pendingCount  = tanks.filter(t => t.classification === 'URGENT' && t.postingStatus === 'PENDING').length;
+    const pendingCount  = tanks.filter(t => t.classification === 'RED' && t.postingStatus === 'PENDING').length;
     const rejectedCount = tanks.filter(t => t.postingStatus === 'REJECTED').length;
     const postedCount   = tanks.filter(t => t.postingStatus === 'POSTED').length;
     return `**Run Summary — ${latestRun.runDate}:**\n\n` +
       `- Total tanks: **${latestRun.tankCount || 0}**\n` +
       `- OK: **${latestRun.okCount || 0}**\n` +
       `- FLAG: **${latestRun.flagCount || 0}** (auto-posted)\n` +
-      `- URGENT: **${tanks.filter(t => t.classification === 'URGENT').length}**\n` +
+      `- URGENT: **${tanks.filter(t => t.classification === 'RED').length}**\n` +
       (pendingCount  > 0 ? `  - Pending approval: **${pendingCount}**\n` : '') +
       (rejectedCount > 0 ? `  - Rejected: **${rejectedCount}**\n` : '') +
       (postedCount   > 0 ? `  - Posted: **${postedCount}**\n` : '') +
