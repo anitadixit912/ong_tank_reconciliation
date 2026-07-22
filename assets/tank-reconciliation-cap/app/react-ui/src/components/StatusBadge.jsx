@@ -11,6 +11,7 @@ const MAP = {
   URGENT: 'badge-urgent',
   // Posting status
   PENDING:           'badge-pending',
+  AUTO_POSTING:      'badge-pending',
   POSTED:            'badge-posted',
   REJECTED:          'badge-rejected',
   FAILED:            'badge-failed',
@@ -28,10 +29,11 @@ const LABELS = {
   FLAG:   'Flag',
   URGENT: 'Urgent',
   AWAITING_APPROVAL: 'Awaiting Approval',
-  PENDING:  'Pending',
-  POSTED:   'Posted',
-  REJECTED: 'Rejected',
-  FAILED:   'Failed',
+  PENDING:      'Pending Approval',
+  AUTO_POSTING: '⏳ Auto-Posting',
+  POSTED:       '✅ Posted',
+  REJECTED:     '✗ Rejected',
+  FAILED:       '⚠️ Post Failed',
   VARIANCE: 'Variance',
   APPROVED: 'Approved',
   COMPLETE: 'Complete'

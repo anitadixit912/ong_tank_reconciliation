@@ -10,8 +10,19 @@ export default function ApprovalQueue() {
   const [error, setError] = useState(null);
   const [selected, setSelected] = useState(null);
   const [comment, setComment] = useState('');
+  const [reasonCode, setReasonCode] = useState('');
   const [acting, setActing] = useState(false);
   const [actionMsg, setActionMsg] = useState(null);
+
+  const REASON_CODES = [
+    { code: '',   label: '-- Select Reason Code --' },
+    { code: '01', label: '01 — Measurement' },
+    { code: '02', label: '02 — Transport Gain' },
+    { code: '03', label: '03 — Transport Losses' },
+    { code: '04', label: '04 — Customer not available' },
+    { code: '05', label: '05 — Insufficient quantity delivered' },
+    { code: '06', label: '06 — Lost quantity' },
+  ];
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -31,6 +42,7 @@ export default function ApprovalQueue() {
   function openPanel(item) {
     setSelected(item);
     setComment('');
+    setReasonCode('');
     setActionMsg(null);
   }
 
@@ -40,14 +52,18 @@ export default function ApprovalQueue() {
       setActionMsg({ type: 'error', text: 'A comment is mandatory when rejecting.' });
       return;
     }
+    // Build full comment with reason code
+    const fullComment = reasonCode
+      ? `[${reasonCode}] ${comment}`.trim()
+      : comment;
     setActing(true);
     setActionMsg(null);
     try {
       if (decision === 'approve') {
-        await approvePosting(selected.ID, comment);
+        await approvePosting(selected.ID, fullComment);
         setActionMsg({ type: 'success', text: `Tank ${selected.tankId} approved.` });
       } else {
-        await rejectPosting(selected.ID, comment);
+        await rejectPosting(selected.ID, fullComment);
         setActionMsg({ type: 'success', text: `Tank ${selected.tankId} posting rejected.` });
       }
       await load();
@@ -163,6 +179,20 @@ export default function ApprovalQueue() {
                   <div className="form-label">Delta %</div>
                   <span className="delta-urgent">{selected.deltaPercent?.toFixed(2) ?? '–'}%</span>
                 </div>
+              </div>
+
+              <div>
+                <label className="form-label">Reason Code</label>
+                <select
+                  className="input"
+                  value={reasonCode}
+                  onChange={e => setReasonCode(e.target.value)}
+                  style={{ width: '100%' }}
+                >
+                  {REASON_CODES.map(r => (
+                    <option key={r.code} value={r.code}>{r.label}</option>
+                  ))}
+                </select>
               </div>
 
               <div>

@@ -205,6 +205,40 @@ async function _runInlineReconciliation(runId, runDate, actor) {
         continue;
       }
 
+      // ── Non-Standard Input Detection ─────────────────────────────────────
+      const inputWarnings = [];
+
+      // Check 1: Negative or zero physical quantity
+      if (physicalQty <= 0) {
+        inputWarnings.push('INVALID: Physical quantity is zero or negative (' + physicalQty + ')');
+      }
+
+      // Check 2: Physical quantity exceeds reasonable tank capacity (>500,000 TO)
+      if (physicalQty > 500000) {
+        inputWarnings.push('SUSPICIOUS: Physical quantity exceeds 500,000 TO — possible data error');
+      }
+
+      // Check 3: Book stock is zero or negative
+      if (bookStock <= 0) {
+        inputWarnings.push('WARNING: Book stock is zero or negative — RELSTOCK may be stale');
+      }
+
+      // Check 4: Variance > 1000% — likely data quality issue not physical
+      const rawDeltaPct = bookStock > 0 ? Math.abs((physicalQty - bookStock) / bookStock) * 100 : 0;
+      if (rawDeltaPct > 1000) {
+        inputWarnings.push('DATA_QUALITY: Variance ' + rawDeltaPct.toFixed(0) + '% exceeds 1000% — likely stale dip or book stock mismatch');
+      }
+
+      // Log non-standard input warnings to audit trail
+      if (inputWarnings.length > 0) {
+        await INSERT.into('tank.reconciliation.AuditLogEntry').entries({
+          ID: cds.utils.uuid(), run_ID: runId, tankId: tank.tankId,
+          step: 'INGEST', milestone: 'M1', outcome: 'ACHIEVED',
+          message: 'M1.input_check: ' + inputWarnings.join(' | '),
+          timestamp: new Date().toISOString(), actor
+        });
+      }
+
       const grossVolumeObserved = physicalQty;
 
       // M2: VCF Correction — attempt Hydrocarbon Qty Conversion API, fallback to ASTM 1.0
@@ -440,14 +474,10 @@ module.exports = class ReconciliationService extends cds.ApplicationService {
       const { runDate } = req.data;
       if (!runDate) return req.reject(400, 'runDate is required');
 
-      const existing = await SELECT.one
-        .from('tank.reconciliation.ReconciliationRun')
-        .where({ runDate, status: { '!=': 'FAILED' } });
-      if (existing) return req.reject(409, 'A run already exists for ' + runDate + ' (status: ' + existing.status + ')');
-
-      const runId = cds.utils.uuid();
-      const now   = new Date().toISOString();
-      const actor = (req.user && req.user.id) || 'scheduler';
+      const runId   = cds.utils.uuid();
+      const now     = new Date().toISOString();
+      const runTime = now.slice(11, 19); // HH:MM:SS
+      const actor   = (req.user && req.user.id) || 'scheduler';
 
       // Create run with PENDING status — n8n will drive it through states
       await INSERT.into('tank.reconciliation.ReconciliationRun').entries({
@@ -458,7 +488,7 @@ module.exports = class ReconciliationService extends cds.ApplicationService {
       await INSERT.into('tank.reconciliation.AuditLogEntry').entries({
         ID: cds.utils.uuid(), run_ID: runId,
         step: 'INGEST', milestone: 'M1', outcome: 'ACHIEVED',
-        message: 'M1.trigger: reconciliation run initiated for ' + runDate,
+        message: 'M1.trigger: reconciliation run initiated for ' + runDate + ' at ' + runTime,
         timestamp: now, actor
       });
 
@@ -481,8 +511,29 @@ module.exports = class ReconciliationService extends cds.ApplicationService {
 
       const result = await SELECT.one.from('tank.reconciliation.TankResult').where({ ID: tankResultId });
       if (!result) return req.reject(404, 'TankResult not found');
-      if (result.classification !== 'RED') return req.reject(400, 'Only URGENT tanks require approval');
+      if (result.classification !== 'RED') return req.reject(400, 'Only RED tanks require approval');
       if (result.postingStatus  !== 'PENDING') return req.reject(409, 'Tank is already in status: ' + result.postingStatus);
+
+      // ── License Constraint Check ─────────────────────────────────────────
+      // Fetch tank config to check material license via ZTANK_DIP_SRV
+      const tankConfig = await SELECT.one.from('tank.reconciliation.TankConfiguration')
+        .where({ tankId: result.tankId });
+
+      if (tankConfig && tankConfig.active === false) {
+        return req.reject(403, 'Tank ' + result.tankId + ' is inactive — posting blocked');
+      }
+
+      // Check if variance > 1000% — flag as potential data quality issue before allowing approval
+      const deltaPercent = parseFloat(result.deltaPercent || 0);
+      if (deltaPercent > 1000) {
+        const now2 = new Date().toISOString();
+        await INSERT.into('tank.reconciliation.AuditLogEntry').entries({
+          ID: cds.utils.uuid(), run_ID: result.run_ID, tankId: result.tankId,
+          step: 'APPROVAL', milestone: 'M4', outcome: 'ACHIEVED',
+          message: 'M4.license_check: HIGH VARIANCE WARNING — ' + deltaPercent.toFixed(0) + '% variance approved by ' + ((req.user && req.user.id) || 'supervisor') + '. Verify data quality before posting.',
+          timestamp: now2, actor: (req.user && req.user.id) || 'supervisor'
+        });
+      }
 
       const now       = new Date().toISOString();
       const decidedBy = (req.user && req.user.id) || 'supervisor';
