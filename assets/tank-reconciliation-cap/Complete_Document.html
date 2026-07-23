@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Complete Document — Hydrocarbon Tank Stock Reconciliation</title>
+  <style>
+    body { font-family: Calibri, Arial, sans-serif; font-size: 11pt; margin: 60px; color: #222; line-height: 1.6; }
+    h1 { font-size: 20pt; color: #1a3c6e; border-bottom: 2px solid #1a3c6e; padding-bottom: 6px; margin-top: 30px; }
+    h2 { font-size: 15pt; color: #1a3c6e; margin-top: 24px; border-bottom: 1px solid #ccc; padding-bottom: 4px; }
+    h3 { font-size: 12pt; color: #2e5fa3; margin-top: 18px; }
+    h4 { font-size: 11pt; color: #444; margin-top: 14px; }
+    table { border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 10pt; }
+    th { background-color: #1a3c6e; color: white; padding: 8px 10px; text-align: left; }
+    td { border: 1px solid #ccc; padding: 7px 10px; vertical-align: top; }
+    tr:nth-child(even) td { background-color: #f4f7fb; }
+    code { background: #f0f0f0; padding: 1px 5px; border-radius: 3px; font-family: Consolas, monospace; font-size: 10pt; }
+    pre { background: #f0f0f0; padding: 14px; border-radius: 4px; font-family: Consolas, monospace; font-size: 9.5pt; overflow-x: auto; border-left: 4px solid #1a3c6e; }
+    .cover { text-align: center; padding: 80px 0 60px 0; border-bottom: 2px solid #1a3c6e; margin-bottom: 40px; }
+    .cover h1 { font-size: 26pt; border: none; }
+    .cover .subtitle { font-size: 14pt; color: #555; margin-top: 10px; }
+    .cover .meta { font-size: 11pt; color: #777; margin-top: 30px; }
+    .badge-green { background: #d4edda; color: #155724; padding: 2px 8px; border-radius: 10px; font-size: 9.5pt; }
+    .badge-amber { background: #fff3cd; color: #856404; padding: 2px 8px; border-radius: 10px; font-size: 9.5pt; }
+    .badge-red   { background: #f8d7da; color: #721c24; padding: 2px 8px; border-radius: 10px; font-size: 9.5pt; }
+    .badge-blue  { background: #cce5ff; color: #004085; padding: 2px 8px; border-radius: 10px; font-size: 9.5pt; }
+    .toc { background: #f4f7fb; border: 1px solid #cce; padding: 20px 30px; border-radius: 6px; margin-bottom: 30px; }
+    .toc a { color: #1a3c6e; text-decoration: none; }
+    .toc a:hover { text-decoration: underline; }
+    .toc li { margin: 4px 0; }
+    .highlight-box { background: #eef4ff; border-left: 4px solid #1a3c6e; padding: 12px 16px; margin: 12px 0; border-radius: 0 4px 4px 0; }
+    .warning-box { background: #fff8e1; border-left: 4px solid #ffc107; padding: 12px 16px; margin: 12px 0; border-radius: 0 4px 4px 0; }
+    ul li, ol li { margin: 4px 0; }
+    @media print { body { margin: 30px; } }
+  </style>
+</head>
+<body>
+
+<!-- COVER PAGE -->
+<div class="cover">
+  <h1>Hydrocarbon Tank Stock Reconciliation</h1>
+  <div class="subtitle">Complete Functional &amp; Technical Solution Document</div>
+  <div class="meta">
+    <p><strong>Platform:</strong> SAP BTP (Business Technology Platform)</p>
+    <p><strong>Backend System:</strong> IS-OIL HPM on OGS/650</p>
+    <p><strong>Technology:</strong> SAP CAP · React 19 · SAP UI5 WebComponents · AI Core</p>
+    <p><strong>Date:</strong> July 2026</p>
+    <p><strong>Author:</strong> Anita Dixit</p>
+  </div>
+</div>
+
+<!-- TABLE OF CONTENTS -->
+<div class="toc">
+  <h2 style="border:none;margin-top:0">Table of Contents</h2>
+  <ol>
+    <li><a href="#overview">Solution Overview</a></li>
+    <li><a href="#business-problem">Business Problem</a></li>
+    <li><a href="#functional">Functional Design</a></li>
+    <li><a href="#milestones">Milestones M1–M6</a></li>
+    <li><a href="#technical">Technical Architecture</a></li>
+    <li><a href="#isoil">IS-OIL Integration</a></li>
+    <li><a href="#security">Security &amp; Roles</a></li>
+    <li><a href="#intelligence">Intelligence Features</a></li>
+    <li><a href="#frontend">Frontend (UI)</a></li>
+    <li><a href="#deployment">Deployment</a></li>
+    <li><a href="#tanks">Tank Configuration</a></li>
+    <li><a href="#status">Current Status &amp; Known Limitations</a></li>
+  </ol>
+</div>
+
+<!-- 1. SOLUTION OVERVIEW -->
+<h1 id="overview">1. Solution Overview</h1>
+<p>
+  The <strong>Hydrocarbon Tank Stock Reconciliation</strong> solution is a full-stack enterprise application built on <strong>SAP BTP</strong> that automates the daily reconciliation of physical tank measurements (ATG dip readings from IS-OIL HPM) against SAP book stock. It classifies variances, routes urgent ones through a supervisor approval workflow, and posts approved goods movements back to SAP via IS-OIL Physical Inventory BAPIs.
+</p>
+<div class="highlight-box">
+  <strong>App URL:</strong> <code>https://tank-reconciliation-approuter-proud-jackal-qo.cfapps.us10.hana.ondemand.com</code>
+</div>
+
+<h3>Key Value Proposition</h3>
+<ul>
+  <li>Eliminates manual spreadsheet-based reconciliation</li>
+  <li>Provides real-time variance classification with GREEN / AMBER / RED thresholds</li>
+  <li>Enforces IS-OIL compliant goods movement postings via Physical Inventory BAPIs</li>
+  <li>Full audit trail from data ingestion to posting (M1–M6)</li>
+  <li>AI-powered assistant for operator guidance and decision support</li>
+  <li>Role-based access control via SAP XSUAA</li>
+</ul>
+
+<!-- 2. BUSINESS PROBLEM -->
+<h1 id="business-problem">2. Business Problem</h1>
+<p>
+  Oil terminals operate large storage tanks containing hydrocarbons (diesel, propane, gasoline). Every day, physical dip readings are taken from Automatic Tank Gauges (ATG) and recorded in the IS-OIL system (OIB_TANKDIP table). These physical measurements must be compared against the SAP book stock (RELSTOCK) to identify losses, gains, or measurement errors.
+</p>
+<h3>Challenges Before This Solution</h3>
+<ul>
+  <li>Manual comparison between ATG readings and SAP book stock</li>
+  <li>No automated threshold-based classification</li>
+  <li>No structured approval workflow for large variances</li>
+  <li>No audit trail for regulatory compliance</li>
+  <li>Excise duty implications for taxed hydrocarbons not handled automatically</li>
+  <li>No AI-assisted decision support for operators</li>
+</ul>
+
+<!-- 3. FUNCTIONAL DESIGN -->
+<h1 id="functional">3. Functional Design</h1>
+
+<h2>3.1 Reconciliation Flow</h2>
+<ol>
+  <li><strong>Admin triggers a reconciliation run</strong> for a selected date</li>
+  <li>System fetches the latest dip reading from IS-OIL (<code>OIB_TANKDIP</code>) for each configured tank via <code>ZTANK_DIP_SRV_SRV</code></li>
+  <li>Physical quantity (<code>QUAN_SKU</code>) is compared against book stock (<code>RELSTOCK</code>)</li>
+  <li>Variance is calculated and classified as GREEN / AMBER / RED</li>
+  <li>GREEN and AMBER variances are auto-posted; RED variances are held for supervisor approval</li>
+  <li>Approved postings trigger IS-OIL Physical Inventory BAPIs to post goods movement</li>
+  <li>Full audit trail written at each milestone (M1–M6)</li>
+  <li>Notifications sent via MS Teams webhook or BTP Alert Notification Service</li>
+</ol>
+
+<h2>3.2 Variance Classification</h2>
+<table>
+  <tr><th>Classification</th><th>Threshold</th><th>Action</th></tr>
+  <tr><td><span class="badge-green">🟢 GREEN</span></td><td>Delta ≤ 0.5%</td><td>Auto-posted immediately</td></tr>
+  <tr><td><span class="badge-amber">🟡 AMBER</span></td><td>0.5% &lt; Delta ≤ 2.0%</td><td>Auto-posted, flagged for monitoring</td></tr>
+  <tr><td><span class="badge-red">🔴 RED</span></td><td>Delta &gt; 2.0%</td><td>Held — requires supervisor approval</td></tr>
+</table>
+<p><em>Thresholds are configurable per tank in TankConfiguration.</em></p>
+
+<h2>3.3 Approval Workflow</h2>
+<ol>
+  <li>RED-classified tanks appear in the <strong>Approval Queue</strong></li>
+  <li>Supervisor selects a <strong>Reason Code</strong> and enters a comment</li>
+  <li>Supervisor clicks <strong>Approve</strong> or <strong>Reject</strong></li>
+  <li>Approved tanks trigger M5 goods movement posting</li>
+  <li>Rejected tanks are recorded with reason in the audit trail</li>
+</ol>
+
+<h3>IS-OIL Reason Codes</h3>
+<table>
+  <tr><th>Code</th><th>Description</th></tr>
+  <tr><td>01</td><td>Measurement</td></tr>
+  <tr><td>02</td><td>Transport Gain</td></tr>
+  <tr><td>03</td><td>Transport Losses</td></tr>
+  <tr><td>04</td><td>Customer not available</td></tr>
+  <tr><td>05</td><td>Insufficient quantity delivered</td></tr>
+  <tr><td>06</td><td>Lost quantity</td></tr>
+</table>
+
+<!-- 4. MILESTONES -->
+<h1 id="milestones">4. Milestones M1–M6</h1>
+
+<table>
+  <tr><th>Milestone</th><th>Name</th><th>Description</th><th>Status</th></tr>
+  <tr>
+    <td><strong>M1</strong></td>
+    <td>Data Ingestion</td>
+    <td>Fetch latest dip from <code>OIB_TANKDIP</code> via <code>ZTANK_DIP_SRV_SRV</code>. Non-standard input detection: zero/negative qty, qty &gt;500k TO, book stock ≤0, variance &gt;1000%.</td>
+    <td><span class="badge-green">✅ Complete</span></td>
+  </tr>
+  <tr>
+    <td><strong>M2</strong></td>
+    <td>VCF Correction</td>
+    <td>Volume Correction Factor applied. <code>QUAN_SKU</code> in <code>OIB_TANKDIP</code> is already VCF-corrected by IS-OIL — factor 1.0 is correct. VCF API URL supported if external correction needed.</td>
+    <td><span class="badge-green">✅ Complete</span></td>
+  </tr>
+  <tr>
+    <td><strong>M3</strong></td>
+    <td>Variance Calculation</td>
+    <td>Delta = netVolumePhysical − bookStock. DeltaPercent = |delta/bookStock| × 100. Classification: GREEN/AMBER/RED per tank tolerances.</td>
+    <td><span class="badge-green">✅ Complete</span></td>
+  </tr>
+  <tr>
+    <td><strong>M4</strong></td>
+    <td>Approval Workflow</td>
+    <td>RED tanks routed to Approval Queue. Supervisor approves/rejects with reason code [01–06] and comment. High variance warning (&gt;1000%) written to audit trail. License constraint check (inactive tanks blocked).</td>
+    <td><span class="badge-green">✅ Complete</span></td>
+  </tr>
+  <tr>
+    <td><strong>M5</strong></td>
+    <td>Goods Movement Posting</td>
+    <td>IS-OIL Physical Inventory BAPIs: <code>BAPI_MATPHYSINV_CREATE</code> → <code>BAPI_MATPHYSINV_COUNT</code> → <code>BAPI_MATPHYSINV_POSTDIFF</code>. Posts movement type 701 (gain) or 702 (loss). IS-OIL chain: OIH10 → OIH01 → OIH07.</td>
+    <td><span class="badge-amber">⚠️ Partial</span></td>
+  </tr>
+  <tr>
+    <td><strong>M6</strong></td>
+    <td>Alerts &amp; Notifications</td>
+    <td>MS Teams webhook notification with GREEN/AMBER/RED status, tank counts, and run summary. BTP Alert Notification Service supported. In-app notification bell with badge count.</td>
+    <td><span class="badge-green">✅ Complete</span></td>
+  </tr>
+</table>
+
+<!-- 5. TECHNICAL ARCHITECTURE -->
+<h1 id="technical">5. Technical Architecture</h1>
+
+<h2>5.1 Layer Structure</h2>
+<table>
+  <tr><th>Layer</th><th>Technology</th><th>Description</th></tr>
+  <tr><td>Database</td><td>SQLite (CF) / SAP HANA HDI (MTA)</td><td>Domain model defined in CDS (<code>db/schema.cds</code>)</td></tr>
+  <tr><td>Backend Service</td><td>SAP CAP (Node.js)</td><td>OData service + business logic (<code>srv/reconciliation-service.js</code>)</td></tr>
+  <tr><td>Frontend</td><td>React 19 + SAP UI5 WebComponents</td><td>Fiori-design SPA (<code>app/react-ui/</code>)</td></tr>
+  <tr><td>AppRouter</td><td>SAP AppRouter</td><td>Authentication proxy, forwards token to CAP backend</td></tr>
+  <tr><td>Auth</td><td>SAP XSUAA</td><td>OAuth2 / JWT token validation, role-based access</td></tr>
+  <tr><td>Connectivity</td><td>SAP Cloud Connector</td><td>Secure tunnel to on-premise OGS/650 IS-OIL system</td></tr>
+  <tr><td>AI</td><td>SAP AI Core</td><td>GPT-4o powered chat assistant for operator guidance</td></tr>
+</table>
+
+<h2>5.2 Data Model (CDS Entities)</h2>
+<table>
+  <tr><th>Entity</th><th>Purpose</th></tr>
+  <tr><td><code>ReconciliationRun</code></td><td>One record per reconciliation run (date, status, counts)</td></tr>
+  <tr><td><code>TankResult</code></td><td>Per-tank result per run (physical qty, book stock, delta, classification, posting status)</td></tr>
+  <tr><td><code>ApprovalRecord</code></td><td>Approval/rejection decisions with approver, timestamp, comment</td></tr>
+  <tr><td><code>AuditLogEntry</code></td><td>Full audit trail — milestone (M1–M6), step, outcome, message, actor</td></tr>
+  <tr><td><code>TankConfiguration</code></td><td>Per-tank master data: material, plant, SLOC, tolerances, active flag</td></tr>
+  <tr><td><code>TankVarianceTrend</code></td><td>CDS view — delta history per tank across completed runs</td></tr>
+</table>
+
+<h2>5.3 Key Service Actions</h2>
+<table>
+  <tr><th>Action</th><th>Role Required</th><th>Description</th></tr>
+  <tr><td><code>triggerRun(runDate)</code></td><td>Admin / OGSIntegration</td><td>Starts reconciliation for a given date</td></tr>
+  <tr><td><code>approvePosting(tankResultId, comment)</code></td><td>Approver / OGSIntegration</td><td>Approves RED variance and triggers M5 posting</td></tr>
+  <tr><td><code>rejectPosting(tankResultId, comment)</code></td><td>Approver / OGSIntegration</td><td>Rejects RED variance with mandatory comment</td></tr>
+  <tr><td><code>retriggerDataCollection(runId)</code></td><td>Admin / OGSIntegration</td><td>Re-runs data collection for FAILED/PENDING runs</td></tr>
+  <tr><td><code>chat(message, sessionId)</code></td><td>All roles</td><td>AI assistant — proxies to SAP AI Core (GPT-4o)</td></tr>
+  <tr><td><code>getPlants()</code></td><td>All roles</td><td>Fetches plant list from OGS via ZTANK_PLANT_SRV_SRV</td></tr>
+</table>
+
+<h2>5.4 OData Services on OGS/650</h2>
+<table>
+  <tr><th>Service</th><th>Purpose</th></tr>
+  <tr><td><code>ZTANK_DIP_SRV_SRV</code></td><td>Reads latest tank dip from <code>OIB_TANKDIP</code> by SOCNR</td></tr>
+  <tr><td><code>ZTANK_PLANT_SRV_SRV</code></td><td>Provides plant value help from <code>T001W</code></td></tr>
+  <tr><td><code>ZTANK_POST_SRV_SRV</code></td><td>Posts goods movement via IS-OIL Physical Inventory BAPIs</td></tr>
+</table>
+
+<h2>5.5 Build Pipeline</h2>
+<pre>node build.js
+  Step 1: npm install (root)
+  Step 2: cds build --production → gen/srv/
+  Step 3: Vite build (React UI) → app/dist/
+  Step 4: Copy React dist → gen/srv/app/
+  Step 5: npm install --production in gen/srv/
+  Step 6: Deploy SQLite schema + seed data
+  Deploy: cf push -f manifest.yml</pre>
+
+<!-- 6. IS-OIL INTEGRATION -->
+<h1 id="isoil">6. IS-OIL Integration</h1>
+
+<h2>6.1 Tank Dip Data Source</h2>
+<p>Physical inventory data is sourced from the IS-OIL HPM table <code>OIB_TANKDIP</code> on OGS/650:</p>
+<table>
+  <tr><th>Field</th><th>Meaning</th></tr>
+  <tr><td><code>SOCNR</code></td><td>Tank ID (20-char, zero-padded)</td></tr>
+  <tr><td><code>QUAN_SKU</code></td><td>Physical quantity in TO (metric tons) — already VCF-corrected by IS-OIL</td></tr>
+  <tr><td><code>RELSTOCK</code></td><td>Book stock (SAP stock at time of dip)</td></tr>
+  <tr><td><code>ETMSTM</code></td><td>Timestamp of dip reading</td></tr>
+  <tr><td><code>MEINS</code></td><td>Unit of measure (TO)</td></tr>
+  <tr><td><code>QUAN_LVC</code></td><td>Line Volume Corrected (different UoM — not used for reconciliation)</td></tr>
+</table>
+
+<div class="highlight-box">
+  <strong>Important:</strong> <code>QUAN_SKU</code> is already VCF (Volume Correction Factor) corrected by IS-OIL before writing to <code>OIB_TANKDIP</code>. The reconciliation uses factor 1.0 — no external VCF API is needed.
+</div>
+
+<h2>6.2 Plant / Storage Location Mapping</h2>
+<p>Tank SOCNR is mapped to SAP Plant and Storage Location via <code>OIISOCISL</code> table on OGS/650.</p>
+
+<h2>6.3 M5 Goods Movement Posting — IS-OIL BAPI Chain</h2>
+<p>The posting flow uses three standard IS-OIL Physical Inventory BAPIs:</p>
+<pre>Step 1: BAPI_MATPHYSINV_CREATE
+        → Creates a new Physical Inventory document (IKPF)
+        → Parameters: Plant, Storage Location, Doc Date, Material, Batch
+
+Step 2: BAPI_MATPHYSINV_COUNT
+        → Records the physical count quantity
+        → Parameters: PI Doc, Fiscal Year, Count Date, Item, Material, Batch, Qty, UoM
+
+Step 3: BAPI_MATPHYSINV_POSTDIFF
+        → Posts the difference as goods movement (701 gain / 702 loss)
+        → IS-OIL validates: OIH10 → OIH01 → OIH07
+        → BAPI_TRANSACTION_COMMIT after each step</pre>
+
+<h2>6.4 IS-OIL Configuration Tables</h2>
+<table>
+  <tr><th>Table</th><th>Purpose</th><th>Status</th></tr>
+  <tr><td><code>OIH10</code></td><td>License Requirements — defines Handling Type per Company/Plant</td><td><span class="badge-amber">⚠️ Pending wildcard fix</span></td></tr>
+  <tr><td><code>OIH01</code></td><td>Excise Duty Rates per Company/Plant/ED-Group/Handling Type</td><td><span class="badge-green">✅ Configured</span></td></tr>
+  <tr><td><code>OIH07</code></td><td>Allowed combinations of ED Group and Handling Type</td><td><span class="badge-green">✅ Configured</span></td></tr>
+</table>
+
+<h3>Current OIH10 Issue</h3>
+<p>OIH10 has two wildcard entries for company 1710:</p>
+<table>
+  <tr><th>BUKRS</th><th>WERKS</th><th>HANTYP</th><th>TAXKEY</th><th>Note</th></tr>
+  <tr><td>1710</td><td>****</td><td>01</td><td>TA</td><td>New — Taxed</td></tr>
+  <tr><td>1710</td><td>****</td><td>99</td><td>UT</td><td>Old — Untaxed (blocker)</td></tr>
+  <tr><td>1710</td><td>1743</td><td>01</td><td>TA</td><td>Plant-specific — added</td></tr>
+</table>
+<div class="warning-box">
+  The IS-OIL function module reads OIH10 with wildcard <code>****</code> first and picks HT <code>99</code> (Untaxed) before the plant-specific entry. Fix: Basis team to delete or change the <code>1710/****/99/UT</code> entry.
+</div>
+
+<h2>6.5 Connectivity — SAP Cloud Connector</h2>
+<ul>
+  <li>OGS/650 is an on-premise IS-OIL system</li>
+  <li>BTP connects via <strong>SAP Cloud Connector</strong> using the <code>proj-vector-connectivity-service</code></li>
+  <li>Destination <code>OGS_S4</code> configured in BTP Destination Service with <code>ProxyType=OnPremise</code></li>
+  <li>Location ID: <code>APAC_DEV10</code></li>
+  <li>All HTTP calls to OGS routed through connectivity proxy at <code>connectivityproxy.internal.cf.us10.hana.ondemand.com:20003</code></li>
+</ul>
+
+<!-- 7. SECURITY -->
+<h1 id="security">7. Security &amp; Roles</h1>
+
+<h2>7.1 Role Model</h2>
+<table>
+  <tr><th>Role Collection</th><th>Role Template</th><th>Permissions</th></tr>
+  <tr><td><code>TankRecon_User</code></td><td>ReconciliationUser</td><td>Read-only: view runs, tank results, audit trail</td></tr>
+  <tr><td><code>TankRecon_Approver</code></td><td>ReconciliationApprover</td><td>User + approve/reject urgent variances</td></tr>
+  <tr><td><code>TankRecon_Admin</code></td><td>ReconciliationAdmin</td><td>Full access: trigger runs, manage tank configuration</td></tr>
+  <tr><td><code>OGSSystemIntegration</code></td><td>OGSIntegration</td><td>Machine-to-machine full access for IS-OIL OGS system</td></tr>
+</table>
+
+<h2>7.2 Authentication Flow</h2>
+<pre>User → AppRouter (XSUAA login) → JWT token issued
+     → CAP Backend validates token → checks role scopes
+     → Actions restricted by @(requires: [...]) annotations in CDS</pre>
+
+<!-- 8. INTELLIGENCE FEATURES -->
+<h1 id="intelligence">8. Intelligence Features</h1>
+
+<h2>8.1 Non-Standard Input Detection (M1)</h2>
+<table>
+  <tr><th>Condition</th><th>Audit Message</th></tr>
+  <tr><td>Physical qty ≤ 0</td><td><code>INVALID: Physical quantity is zero or negative</code></td></tr>
+  <tr><td>Physical qty &gt; 500,000 TO</td><td><code>SUSPICIOUS: Physical quantity exceeds 500,000 TO</code></td></tr>
+  <tr><td>Book stock ≤ 0</td><td><code>WARNING: Book stock is zero or negative</code></td></tr>
+  <tr><td>Variance &gt; 1000%</td><td><code>DATA_QUALITY: Variance X% exceeds 1000%</code></td></tr>
+</table>
+
+<h2>8.2 License Constraint Check (M4)</h2>
+<ul>
+  <li>Inactive tanks (active = false in TankConfiguration) → blocked from posting with HTTP 403</li>
+  <li>Variance &gt;1000% → <code>HIGH VARIANCE WARNING</code> written to M4 audit entry before allowing approval</li>
+</ul>
+
+<h2>8.3 AI Chat Assistant</h2>
+<ul>
+  <li>Powered by <strong>SAP AI Core</strong> with GPT-4o model</li>
+  <li>System prompt injects live reconciliation context (latest run, tank results, pending approvals)</li>
+  <li>Fallback rule-based replies if AI Core is unavailable</li>
+  <li>Supports queries: latest run status, flagged tanks, approval recommendations, tank-specific variance analysis</li>
+  <li>Specific recommendation logic: data-quality warnings for &gt;500% variance, O4_TIGER re-measurement guidance</li>
+</ul>
+
+<h2>8.4 VCF (Volume Correction Factor)</h2>
+<ul>
+  <li><code>QUAN_SKU</code> in <code>OIB_TANKDIP</code> is already VCF-corrected by IS-OIL HPM</li>
+  <li>Factor 1.0 applied (no double-correction)</li>
+  <li>External VCF API supported via <code>VCF_API_URL</code> env var if gross volume correction needed in future</li>
+</ul>
+
+<!-- 9. FRONTEND -->
+<h1 id="frontend">9. Frontend (UI)</h1>
+
+<h2>9.1 Pages</h2>
+<table>
+  <tr><th>Page</th><th>Route</th><th>Description</th></tr>
+  <tr><td>Dashboard</td><td><code>/</code></td><td>Trigger runs, view recent runs table, notification bell</td></tr>
+  <tr><td>Run Detail</td><td><code>/runs/:id</code></td><td>Tank Results tab + Audit Log tab per run</td></tr>
+  <tr><td>Approval Queue</td><td><code>/approvals</code></td><td>Pending RED tanks — approve/reject with reason code</td></tr>
+  <tr><td>Audit Trail</td><td><code>/audit</code></td><td>Full M1–M6 milestone history across all runs</td></tr>
+  <tr><td>Trend Chart</td><td><code>/trends</code></td><td>30-day delta trend per tank</td></tr>
+  <tr><td>AI Chat</td><td><code>/chat</code></td><td>AI assistant powered by SAP AI Core</td></tr>
+  <tr><td>Configuration</td><td><code>/config</code></td><td>Tank master data — tolerances, plant, SLOC (Admin only)</td></tr>
+</table>
+
+<h2>9.2 Key UI Features</h2>
+<ul>
+  <li>GREEN / AMBER / RED color-coded classification badges throughout</li>
+  <li>Delta bar chart showing variance percentage visually</li>
+  <li>Notification bell with badge count — unread notifications per run</li>
+  <li>Approval panel with reason code dropdown (6 IS-OIL codes) and comment field</li>
+  <li>Material document number with link to S/4HANA for posted tanks</li>
+  <li>UoM displayed as TO (metric tons) throughout</li>
+  <li>Responsive layout using SAP Fiori design language</li>
+</ul>
+
+<!-- 10. DEPLOYMENT -->
+<h1 id="deployment">10. Deployment</h1>
+
+<h2>10.1 BTP Services Used</h2>
+<table>
+  <tr><th>Service</th><th>Instance Name</th><th>Purpose</th></tr>
+  <tr><td>XSUAA</td><td>tank-reconciliation-xsuaa</td><td>Authentication &amp; authorization</td></tr>
+  <tr><td>Destination</td><td>tank-reconciliation-destination</td><td>Resolve OGS_S4 and aicore destinations</td></tr>
+  <tr><td>Connectivity</td><td>proj-vector-connectivity-service</td><td>Cloud Connector tunnel to OGS/650</td></tr>
+</table>
+
+<h2>10.2 CF Applications</h2>
+<table>
+  <tr><th>App</th><th>Memory</th><th>Route</th></tr>
+  <tr><td>tank-reconciliation-cap-srv</td><td>256M</td><td>tank-reconciliation-cap-srv-patient-leopard-kw.cfapps.us10.hana.ondemand.com</td></tr>
+  <tr><td>tank-reconciliation-approuter</td><td>128M</td><td>tank-reconciliation-approuter-proud-jackal-qo.cfapps.us10.hana.ondemand.com</td></tr>
+</table>
+
+<h2>10.3 Environment Variables</h2>
+<table>
+  <tr><th>Variable</th><th>Value</th><th>Purpose</th></tr>
+  <tr><td><code>S4HANA_DESTINATION_NAME</code></td><td>OGS_S4</td><td>BTP destination for OGS/650</td></tr>
+  <tr><td><code>AICORE_DESTINATION_NAME</code></td><td>aicore</td><td>BTP destination for SAP AI Core</td></tr>
+  <tr><td><code>AICORE_DEPLOYMENT_ID</code></td><td>(optional)</td><td>Specific AI Core deployment</td></tr>
+  <tr><td><code>TEAMS_WEBHOOK_URL</code></td><td>(optional)</td><td>MS Teams notification webhook</td></tr>
+  <tr><td><code>BTP_ANS_URL</code></td><td>(optional)</td><td>BTP Alert Notification Service URL</td></tr>
+  <tr><td><code>VCF_API_URL</code></td><td>(optional)</td><td>External VCF correction API (not required)</td></tr>
+</table>
+
+<!-- 11. TANK CONFIGURATION -->
+<h1 id="tanks">11. Tank Configuration</h1>
+<table>
+  <tr><th>Tank ID (SOCNR)</th><th>Name</th><th>Material</th><th>Plant</th><th>SLOC</th><th>GREEN ≤</th><th>RED &gt;</th></tr>
+  <tr><td>00000000000000000023</td><td>C3 Propane Tank USMOB-17T2</td><td>BLK_GASOLINE 87</td><td>1743</td><td>17T1</td><td>0.50%</td><td>2.00%</td></tr>
+  <tr><td>00000000000000000005</td><td>Diesel Tank USMOB-17T1</td><td>BLK_DIESEL</td><td>1743</td><td>17T1</td><td>0.50%</td><td>2.00%</td></tr>
+</table>
+
+<!-- 12. STATUS -->
+<h1 id="status">12. Current Status &amp; Known Limitations</h1>
+<table>
+  <tr><th>Item</th><th>Status</th><th>Notes</th></tr>
+  <tr><td>M1 Data Ingestion</td><td><span class="badge-green">✅ Complete</span></td><td>Live dip from OIB_TANKDIP via ZTANK_DIP_SRV_SRV</td></tr>
+  <tr><td>M2 VCF Correction</td><td><span class="badge-green">✅ Complete</span></td><td>QUAN_SKU already VCF-corrected by IS-OIL — factor 1.0 correct</td></tr>
+  <tr><td>M3 Variance Calculation</td><td><span class="badge-green">✅ Complete</span></td><td>GREEN/AMBER/RED with configurable thresholds</td></tr>
+  <tr><td>M4 Approval Workflow</td><td><span class="badge-green">✅ Complete</span></td><td>Reason codes, license check, high variance warning</td></tr>
+  <tr><td>M5 Goods Movement Posting</td><td><span class="badge-amber">⚠️ Partial</span></td><td>PI BAPIs implemented — pending OIH10 fix: delete/change wildcard entry 1710/****/99/UT by Basis team</td></tr>
+  <tr><td>M6 Alerts &amp; Notifications</td><td><span class="badge-green">✅ Complete</span></td><td>Teams webhook + BTP ANS + in-app bell</td></tr>
+  <tr><td>Authentication</td><td><span class="badge-green">✅ Complete</span></td><td>XSUAA via AppRouter</td></tr>
+  <tr><td>Role-based Access</td><td><span class="badge-green">✅ Complete</span></td><td>4 roles: User, Approver, Admin, OGSIntegration</td></tr>
+  <tr><td>AI Chat Assistant</td><td><span class="badge-green">✅ Complete</span></td><td>SAP AI Core (GPT-4o) with fallback</td></tr>
+  <tr><td>Non-Standard Input Detection</td><td><span class="badge-green">✅ Complete</span></td><td>4 checks at M1 ingestion</td></tr>
+  <tr><td>License Constraint Check</td><td><span class="badge-green">✅ Complete</span></td><td>Inactive tank blocking, high variance warning</td></tr>
+  <tr><td>OGS M2M Integration</td><td><span class="badge-green">✅ Complete</span></td><td>OGSIntegration role for system-to-system calls</td></tr>
+  <tr><td>Trend Chart</td><td><span class="badge-green">✅ Complete</span></td><td>30-day delta history per tank</td></tr>
+</table>
+
+<div class="warning-box">
+  <strong>M5 Remaining Blocker:</strong> OIH10 wildcard entry <code>1710/****/99/UT</code> takes priority over plant-specific entry <code>1710/1743/01/TA</code>. Basis team needs to delete or change the <code>99/UT</code> wildcard. All other IS-OIL configuration (OIH01, OIH07) is correctly in place.
+</div>
+
+<hr style="margin-top:40px;border:1px solid #ccc"/>
+<p style="text-align:center;color:#888;font-size:9pt">
+  Hydrocarbon Tank Stock Reconciliation — Complete Document · SAP BTP · IS-OIL HPM OGS/650 · July 2026
+</p>
+
+</body>
+</html>
