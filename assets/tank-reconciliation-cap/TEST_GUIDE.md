@@ -220,7 +220,7 @@
 
 | Item | Status | Notes |
 |------|--------|-------|
-| M5 Goods Movement Posting | ⚠️ Partial | PI BAPIs implemented, pending OIH07 entry 650/1710/1743/A2/01 by Basis team |
+| M5 Goods Movement Posting | ✅ Complete | PI BAPIs implemented — BAPI_MATPHYSINV_CREATE → COUNT → POSTDIFF. Dip timestamp used as count date. Material doc returned and stored. |
 | VCF Calculation | ✅ Complete | QUAN_SKU in OIB_TANKDIP is already VCF-corrected by IS-OIL — factor 1.0 is correct, no external API needed |
 | Authentication | ✅ Working | XSUAA via AppRouter |
 | Role-based access | ✅ Working | Approvals: Supervisor only, Config: Admin only |

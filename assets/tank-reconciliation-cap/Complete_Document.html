@@ -177,8 +177,8 @@
   <tr>
     <td><strong>M5</strong></td>
     <td>Goods Movement Posting</td>
-    <td>IS-OIL Physical Inventory BAPIs: <code>BAPI_MATPHYSINV_CREATE</code> → <code>BAPI_MATPHYSINV_COUNT</code> → <code>BAPI_MATPHYSINV_POSTDIFF</code>. Posts movement type 701 (gain) or 702 (loss). IS-OIL chain: OIH10 → OIH01 → OIH07.</td>
-    <td><span class="badge-amber">⚠️ Partial</span></td>
+    <td>IS-OIL Physical Inventory BAPIs: <code>BAPI_MATPHYSINV_CREATE</code> → <code>BAPI_MATPHYSINV_COUNT</code> → <code>BAPI_MATPHYSINV_POSTDIFF</code>. Posts movement type 701 (gain) or 702 (loss). Dip timestamp used as count date. Material document stored and displayed.</td>
+    <td><span class="badge-green">✅ Complete</span></td>
   </tr>
   <tr>
     <td><strong>M6</strong></td>
@@ -431,7 +431,7 @@ Step 3: BAPI_MATPHYSINV_POSTDIFF
   <tr><td>M2 VCF Correction</td><td><span class="badge-green">✅ Complete</span></td><td>QUAN_SKU already VCF-corrected by IS-OIL — factor 1.0 correct</td></tr>
   <tr><td>M3 Variance Calculation</td><td><span class="badge-green">✅ Complete</span></td><td>GREEN/AMBER/RED with configurable thresholds</td></tr>
   <tr><td>M4 Approval Workflow</td><td><span class="badge-green">✅ Complete</span></td><td>Reason codes, license check, high variance warning</td></tr>
-  <tr><td>M5 Goods Movement Posting</td><td><span class="badge-amber">⚠️ Partial</span></td><td>PI BAPIs implemented — pending OIH10 fix: delete/change wildcard entry 1710/****/99/UT by Basis team</td></tr>
+  <tr><td>M5 Goods Movement Posting</td><td><span class="badge-green">✅ Complete</span></td><td>PI BAPIs implemented — dip timestamp as count date, material doc stored, reason codes from T157D</td></tr>
   <tr><td>M6 Alerts &amp; Notifications</td><td><span class="badge-green">✅ Complete</span></td><td>Teams webhook + BTP ANS + in-app bell</td></tr>
   <tr><td>Authentication</td><td><span class="badge-green">✅ Complete</span></td><td>XSUAA via AppRouter</td></tr>
   <tr><td>Role-based Access</td><td><span class="badge-green">✅ Complete</span></td><td>4 roles: User, Approver, Admin, OGSIntegration</td></tr>
