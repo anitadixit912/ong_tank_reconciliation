@@ -67,7 +67,7 @@ async function _fetchPhysicalInventory() { return null; }
  * Post a tank dip goods movement via ZTANK_POST_SRV_SRV in OGS.
  * Returns { success, materialDocument, message }
  */
-async function _postTankDip(socnr, etmstm, quanSku, relstock, meins) {
+async function _postTankDip(socnr, etmstm, quanSku, relstock, meins, material, dipTimestamp) {
   try {
     const cfg     = await _resolveDestination(S4HANA_DESTINATION);
     const baseUrl = (cfg.URL || cfg.url || '').replace(/\/$/, '');
@@ -95,12 +95,13 @@ async function _postTankDip(socnr, etmstm, quanSku, relstock, meins) {
 
     // Step 2: POST with CSRF token and session cookie
     const body = JSON.stringify({
-      Socnr:    socnr,
-      Etmstm:   etmstm,
-      QuanSku:  String(quanSku),
-      Relstock: String(relstock),
-      Meins:    meins,
-      Socev:    'C'
+      Socnr:         socnr,
+      Etmstm:        etmstm,
+      QuanSku:       String(quanSku),
+      Relstock:      String(relstock),
+      Meins:         meins,
+      PostingResult: material || '',
+      Socev:         'C'
     });
 
     const postHeaders = {
@@ -112,7 +113,7 @@ async function _postTankDip(socnr, etmstm, quanSku, relstock, meins) {
     if (sessionCookie) postHeaders['Cookie']          = sessionCookie;
 
     const res = await _httpPost(baseUrl + S4_POSTING_PATH + '/TankPostingSet', body, postHeaders, proxyOpts);
-    cds.log('s4').info('_postTankDip POST status=' + res.status);
+    cds.log('s4').info('_postTankDip POST status=' + res.status + ' body=' + res.body.slice(0, 500));
 
     if (res.status === 201 || res.status === 200) {
       cds.log('s4').info('_postTankDip response body: ' + res.body.slice(0, 500));
@@ -165,6 +166,37 @@ async function _fetchPlants() {
     return (payload.d && payload.d.results) ? payload.d.results : [];
   } catch (err) {
     cds.log('s4').warn('Failed to fetch plants: ' + err.message);
+    return [];
+  }
+}
+
+/**
+ * Fetch reason codes from ZTANK_DIP_SRV_SRV/ReasonCodeSet (T157D+T157E) via OGS.
+ * Returns array of { Grund, Bwart, Grtxt } or empty array on error.
+ */
+async function _fetchReasonCodes() {
+  try {
+    const cfg     = await _resolveDestination(S4HANA_DESTINATION);
+    const baseUrl = (cfg.URL || cfg.url || '').replace(/\/$/, '');
+    if (!baseUrl) return [];
+
+    const authHeader = _basicAuthHeader(cfg);
+    const path = '/sap/opu/odata/sap/ZTANK_DIP_SRV_SRV/ReasonCodeSet?$format=json';
+    const headers = { Accept: 'application/json' };
+    if (authHeader) headers['Authorization'] = authHeader;
+
+    const proxyOpts = cfg._proxyHost ? { host: cfg._proxyHost, port: cfg._proxyPort, token: cfg._proxyToken, locationId: cfg._locationId } : null;
+    const res = await _httpGet(baseUrl + path, headers, proxyOpts);
+    if (res.status !== 200) {
+      cds.log('s4').warn('ReasonCodeSet returned ' + res.status);
+      return [];
+    }
+    const payload = JSON.parse(res.body);
+    return (payload.d && payload.d.results) ? payload.d.results.map(r => ({
+      Grund: r.Grund, Bwart: r.Bwart, Grtxt: r.Grtxt
+    })) : [];
+  } catch (err) {
+    cds.log('s4').warn('Failed to fetch reason codes: ' + err.message);
     return [];
   }
 }
@@ -306,7 +338,8 @@ async function _runInlineReconciliation(runId, runDate, actor) {
         toleranceFlagPct: tank.toleranceFlagPct || 0.25,
         postingStatus:    classification === 'RED' ? 'PENDING' : 'AUTO_POSTING',
         vcfSource: vcfSource2,
-        vcfFactor
+        vcfFactor,
+        dipTimestamp: dipData ? (dipData.timestamp || '') : ''
       });
 
       await INSERT.into('tank.reconciliation.AuditLogEntry').entries({
@@ -329,7 +362,9 @@ async function _runInlineReconciliation(runId, runDate, actor) {
           dipData ? dipData.timestamp : '',
           netVolumePhysical,
           bookStock,
-          dipData ? dipData.uom : 'TO'
+          dipData ? dipData.uom : 'TO',
+          tank.materialId,
+          dipData ? dipData.timestamp : ''
         );
 
         const resultId2 = cds.utils.uuid();
@@ -557,7 +592,9 @@ module.exports = class ReconciliationService extends cds.ApplicationService {
         dipData ? dipData.timestamp : '',
         result.netVolumePhysical,
         result.bookStock,
-        result.meins || 'TO'
+        result.meins || 'TO',
+        result.materialId,
+        result.dipTimestamp || (dipData ? dipData.timestamp : '')
       );
 
       if (postResult.success) {
@@ -710,6 +747,12 @@ module.exports = class ReconciliationService extends cds.ApplicationService {
     this.on('getPlants', async (req) => {
       const plants = await _fetchPlants();
       return plants.map(p => ({ Plant: p.Plant, PlantName: p.Plantname || p.PlantName || p.Plant }));
+    });
+
+    // ── getReasonCodes ───────────────────────────────────────────────────────
+    this.on('getReasonCodes', async (req) => {
+      const codes = await _fetchReasonCodes();
+      return codes;
     });
 
     return super.init();

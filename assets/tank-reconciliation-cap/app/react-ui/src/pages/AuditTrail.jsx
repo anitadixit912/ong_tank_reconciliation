@@ -12,13 +12,19 @@ export default function AuditTrail() {
   const [filterMilestone, setFilterMilestone] = useState('');
   const [filterOutcome, setFilterOutcome] = useState('');
   const [filterTank, setFilterTank] = useState('');
+  const [filterDateFrom, setFilterDateFrom] = useState('');
+  const [filterDateTo, setFilterDateTo] = useState('');
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
+      const filters = [];
+      if (filterMilestone) filters.push(`milestone eq '${filterMilestone}'`);
+      if (filterDateFrom)  filters.push(`timestamp ge '${filterDateFrom}T00:00:00Z'`);
+      if (filterDateTo)    filters.push(`timestamp le '${filterDateTo}T23:59:59Z'`);
       const params = {};
-      if (filterMilestone) params['$filter'] = `milestone eq '${filterMilestone}'`;
+      if (filters.length) params['$filter'] = filters.join(' and ');
       const data = await fetchAuditLog(params);
       setEntries(data);
     } catch (e) {
@@ -26,7 +32,7 @@ export default function AuditTrail() {
     } finally {
       setLoading(false);
     }
-  }, [filterMilestone]);
+  }, [filterMilestone, filterDateFrom, filterDateTo]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -63,6 +69,16 @@ export default function AuditTrail() {
               <label className="form-label">Tank ID</label>
               <input className="input" placeholder="e.g. TK-01"
                      value={filterTank} onChange={e => setFilterTank(e.target.value)} />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Date From</label>
+              <input className="input" type="date"
+                     value={filterDateFrom} onChange={e => setFilterDateFrom(e.target.value)} />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Date To</label>
+              <input className="input" type="date"
+                     value={filterDateTo} onChange={e => setFilterDateTo(e.target.value)} />
             </div>
             <button className="btn btn-outline" onClick={load}>↻ Refresh</button>
           </div>

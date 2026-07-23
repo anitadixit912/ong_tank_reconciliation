@@ -102,6 +102,7 @@ export default function TankDetail() {
                   <th>Name</th>
                   <th>Plant</th>
                   <th>SLOC</th>
+                  <th>Dip Date/Time</th>
                   <th>Book Stock ({tanks[0]?.uom || 'TO'})</th>
                   <th>Physical ({tanks[0]?.uom || 'TO'})</th>
                   <th>Delta ({tanks[0]?.uom || 'TO'})</th>
@@ -119,6 +120,11 @@ export default function TankDetail() {
                     <td>{t.tankName || '–'}</td>
                     <td>{t.plant || '–'}</td>
                     <td>{t.storageLocation || '–'}</td>
+                    <td style={{ whiteSpace: 'nowrap', fontSize: '0.8rem' }}>
+                      {t.dipTimestamp
+                        ? t.dipTimestamp.replace(/^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})$/, '$1-$2-$3 $4:$5:$6')
+                        : '–'}
+                    </td>
                     <td>{t.bookStock?.toLocaleString() ?? '–'}</td>
                     <td>{t.netVolumePhysical?.toLocaleString() ?? '–'}</td>
                     <td>

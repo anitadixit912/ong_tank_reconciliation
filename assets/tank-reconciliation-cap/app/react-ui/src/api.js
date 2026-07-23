@@ -110,6 +110,12 @@ export async function fetchPlants() {
   return Array.isArray(res) ? res : (res && res.value ? res.value : []);
 }
 
+// Reason Codes (live from T157D/T157E via OGS)
+export async function fetchReasonCodes() {
+  var res = await action('getReasonCodes', {});
+  return Array.isArray(res) ? res : (res && res.value ? res.value : []);
+}
+
 // Actions
 export async function triggerRun(runDate, plant) {
   var body = { runDate: runDate };

@@ -82,5 +82,12 @@ service ReconciliationService @(path: '/reconciliation')
     Plant     : String(4);
     PlantName : String(40);
   };
+
+  // ─── Reason Codes (live from T157D/T157E via OGS) ────────────────────────
+  action getReasonCodes() returns array of {
+    Grund : String(4);
+    Bwart : String(3);
+    Grtxt : String(40);
+  };
 }
 

@@ -73,6 +73,7 @@ entity TankResult : cuid {
   materialDocumentId : String(20);
   rejectionReason    : String(500);
   vcfSource          : String(20)  default 'API';
+  dipTimestamp       : String(14);
   approvalRecord     : Composition of many ApprovalRecord on approvalRecord.tankResult = $self;
 }
 

@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { Link } from 'react-router-dom';
-import { fetchPendingApprovals, approvePosting, rejectPosting } from '../api.js';
+import { fetchPendingApprovals, approvePosting, rejectPosting, fetchReasonCodes } from '../api.js';
 import StatusBadge from '../components/StatusBadge.jsx';
 import DeltaBar from '../components/DeltaBar.jsx';
 
@@ -13,16 +13,22 @@ export default function ApprovalQueue() {
   const [reasonCode, setReasonCode] = useState('');
   const [acting, setActing] = useState(false);
   const [actionMsg, setActionMsg] = useState(null);
+  const [reasonCodes, setReasonCodes] = useState([]);
 
-  const REASON_CODES = [
-    { code: '',   label: '-- Select Reason Code --' },
-    { code: '01', label: '01 — Measurement' },
-    { code: '02', label: '02 — Transport Gain' },
-    { code: '03', label: '03 — Transport Losses' },
-    { code: '04', label: '04 — Customer not available' },
-    { code: '05', label: '05 — Insufficient quantity delivered' },
-    { code: '06', label: '06 — Lost quantity' },
-  ];
+  useEffect(() => {
+    fetchReasonCodes().then(codes => {
+      // Deduplicate by Grund (show each reason code once, prefer 701)
+      const seen = new Set();
+      const deduped = codes.filter(c => {
+        if (seen.has(c.Grund)) return false;
+        seen.add(c.Grund);
+        return true;
+      });
+      setReasonCodes([{ Grund: '', Grtxt: '-- Select Reason Code --' }, ...deduped]);
+    }).catch(() => {
+      setReasonCodes([{ Grund: '', Grtxt: '-- Select Reason Code --' }]);
+    });
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -189,8 +195,10 @@ export default function ApprovalQueue() {
                   onChange={e => setReasonCode(e.target.value)}
                   style={{ width: '100%' }}
                 >
-                  {REASON_CODES.map(r => (
-                    <option key={r.code} value={r.code}>{r.label}</option>
+                  {reasonCodes.map(r => (
+                    <option key={r.Grund} value={r.Grund}>
+                      {r.Grund ? r.Grund + ' — ' + r.Grtxt : r.Grtxt}
+                    </option>
                   ))}
                 </select>
               </div>
