@@ -58,6 +58,10 @@ export default function ApprovalQueue() {
       setActionMsg({ type: 'error', text: 'A comment is mandatory when rejecting.' });
       return;
     }
+    if (decision === 'approve' && selected.classification === 'RED' && !reasonCode) {
+      setActionMsg({ type: 'error', text: 'A reason code is mandatory for RED variance approval.' });
+      return;
+    }
     // Build full comment with reason code
     const fullComment = reasonCode
       ? `[${reasonCode}] ${comment}`.trim()

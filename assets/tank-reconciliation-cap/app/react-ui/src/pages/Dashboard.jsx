@@ -129,7 +129,7 @@ export default function Dashboard() {
         <KpiTile label="Total Runs"        value={runs.length}      onClick={() => navigate('/')} />
         <KpiTile label="Latest Tanks"      value={totalTanks}       onClick={() => navigate('/configuration')} />
         <KpiTile label="Urgent Variances"  value={pendingUrgent}    className={pendingUrgent > 0 ? 'urgent' : ''}  onClick={() => navigate('/approvals')} />
-        <KpiTile label="Awaiting Approval" value={awaitingApproval} className={awaitingApproval > 0 ? 'flag' : ''} onClick={() => navigate('/approvals')} />
+        <KpiTile label="Awaiting Approval" value={pendingUrgent}    className={pendingUrgent > 0 ? 'flag' : ''} onClick={() => navigate('/approvals')} />
         <KpiTile label="Failed Runs"       value={failedRuns}       className={failedRuns > 0 ? 'urgent' : ''}  onClick={() => navigate('/')} />
       </div>
 

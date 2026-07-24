@@ -57,7 +57,7 @@ export async function fetchRuns(params) {
   Object.entries(params).forEach(function(e) {
     if (e[0] !== 'top') extra[e[0]] = String(e[1]);
   });
-  var qp = odataParams(Object.assign({ '$orderby': 'runDate desc', '$expand': 'tankResults', '$top': params.top || 50 }, extra));
+  var qp = odataParams(Object.assign({ '$orderby': 'triggeredAt desc', '$expand': 'tankResults', '$top': params.top || 50 }, extra));
   var data = await odata('/reconciliation/ReconciliationRuns?' + qp);
   return data.value || [];
 }

@@ -514,6 +514,49 @@ module.exports = class ReconciliationService extends cds.ApplicationService {
       const runTime = now.slice(11, 19); // HH:MM:SS
       const actor   = (req.user && req.user.id) || 'scheduler';
 
+      // ── AMBER 8-hour auto-post check ─────────────────────────────────────
+      // Find AMBER tanks still in AUTO_POSTING from runs completed >8 hours ago
+      const eightHoursAgo = new Date(Date.now() - 8 * 60 * 60 * 1000).toISOString();
+      const pendingAmber = await SELECT.from('tank.reconciliation.TankResult')
+        .where({ classification: 'AMBER', postingStatus: 'AUTO_POSTING' });
+
+      for (const t of pendingAmber) {
+        // Check if the run completed more than 8 hours ago
+        const run = await SELECT.one.from('tank.reconciliation.ReconciliationRun').where({ ID: t.run_ID });
+        if (run && run.completedAt && run.completedAt < eightHoursAgo) {
+          cds.log('s4').info('AMBER 8h auto-post: tank ' + t.tankId + ' run ' + t.run_ID);
+          const dipData = await _fetchTankDip(t.tankId);
+          const postResult = await _postTankDip(
+            t.tankId,
+            dipData ? dipData.timestamp : '',
+            t.netVolumePhysical,
+            t.bookStock,
+            t.uom || 'TO',
+            t.materialId,
+            t.dipTimestamp || ''
+          );
+          if (postResult.success) {
+            await UPDATE('tank.reconciliation.TankResult', t.ID).with({
+              postingStatus: 'POSTED',
+              materialDocumentId: postResult.materialDocument
+            });
+            await INSERT.into('tank.reconciliation.AuditLogEntry').entries({
+              ID: cds.utils.uuid(), run_ID: t.run_ID, tankId: t.tankId,
+              step: 'POSTING', milestone: 'M5', outcome: 'ACHIEVED',
+              message: 'M5.amber-8h-auto-post: AMBER variance auto-posted after 8h — doc=' + postResult.materialDocument,
+              timestamp: new Date().toISOString(), actor
+            });
+          } else {
+            await INSERT.into('tank.reconciliation.AuditLogEntry').entries({
+              ID: cds.utils.uuid(), run_ID: t.run_ID, tankId: t.tankId,
+              step: 'POSTING', milestone: 'M5', outcome: 'FAILED',
+              message: 'M5.amber-8h-auto-post failed: ' + postResult.message,
+              timestamp: new Date().toISOString(), actor
+            });
+          }
+        }
+      }
+
       // Create run with PENDING status — n8n will drive it through states
       await INSERT.into('tank.reconciliation.ReconciliationRun').entries({
         ID: runId, runDate, status: 'PENDING', triggeredBy: actor, triggeredAt: now

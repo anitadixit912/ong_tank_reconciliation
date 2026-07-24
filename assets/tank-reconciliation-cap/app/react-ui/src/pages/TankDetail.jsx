@@ -145,10 +145,10 @@ export default function TankDetail() {
                         </div>
                       )}
                     </td>
-                    <td>{t.materialDocNumber
-                      ? <a href={`${import.meta.env.VITE_S4_URL || '#'}/Material/${t.materialDocNumber}`}
+                    <td>{t.materialDocumentId
+                      ? <a href={`https://10.236.250.15:44301/sap/bc/ui2/flp?sap-client=650&sap-language=EN#MaterialDocument-displayFactSheet?MaterialDocument=${t.materialDocumentId}&MaterialDocumentYear=${new Date().getFullYear()}`}
                            target="_blank" rel="noreferrer" style={{ color: '#0070f3' }}>
-                          {t.materialDocNumber}
+                          📄 {t.materialDocumentId}
                         </a>
                       : '–'}</td>
                   </tr>
