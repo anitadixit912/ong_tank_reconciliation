@@ -45,8 +45,8 @@ async function _fetchTankDip(socnr) {
 
     const r = records[0];
     return {
-      physicalQty : parseFloat(r.QuanSku  || '0'),
-      bookStock   : parseFloat(r.Relstock || '0'),
+      physicalQty : parseFloat(r.Relstock || '0'),
+      bookStock   : parseFloat(r.QuanSku  || '0'),
       uom         : r.Meins || '',
       timestamp   : r.Etmstm || '',
       volumeLvc   : parseFloat(r.QuanLvc || '0')
@@ -662,6 +662,28 @@ module.exports = class ReconciliationService extends cds.ApplicationService {
           message: 'M5.failed: goods movement posting failed — ' + postResult.message,
           timestamp: new Date().toISOString(), actor: decidedBy
         });
+
+        // AI Recommendation for large variance posting failures
+        const deltaPercent = parseFloat(result.deltaPercent || 0);
+        let aiRecommendation = null;
+        if (postResult.message && postResult.message.includes('Difference amount is too high')) {
+          aiRecommendation = deltaPercent > 500
+            ? 'AI Recommendation: The variance of ' + deltaPercent.toFixed(2) + '% indicates the physical dip reading in OIB_TANKDIP has not been updated recently. The last recorded measurement does not reflect the current tank stock position. Action required: (1) Contact the terminal operator to take a new physical measurement of tank ' + result.tankId + ' and record it in O4_TIGER. (2) Once recorded, trigger a new reconciliation run. (3) If the variance is still large after a fresh measurement, contact the Basis team to review the OMJ2 tolerance limit for company code 1710.'
+            : 'AI Recommendation: The posting was blocked because the variance amount exceeds the SAP maximum allowed limit configured in OMJ2. Contact the Basis team to increase the physical inventory difference amount limit for company code 1710, tolerance group 0001.';
+        } else if (postResult.message && postResult.message.includes('Deficit')) {
+          aiRecommendation = 'AI Recommendation: The posting failed because SAP found a stock deficit. This means the system is trying to reduce stock below zero. Possible causes: (1) A previous Physical Inventory document is still open and unposted for this tank — check transaction MI02 for open PI documents at plant ' + (result.plant || '1743') + ' and cancel any unposted ones. (2) The physical measurement recorded is lower than what SAP expects. Contact the terminal operator to verify the current tank reading and re-trigger the reconciliation.';
+        } else if (postResult.message && postResult.message.includes('OIH01')) {
+          aiRecommendation = 'AI Recommendation: IS-OIL excise duty configuration missing. Ask Basis team to check OIH10/OIH01/OIH07 entries for company code 1710, plant ' + (result.plant || '1743') + '.';
+        }
+
+        if (aiRecommendation) {
+          await INSERT.into('tank.reconciliation.AuditLogEntry').entries({
+            ID: cds.utils.uuid(), run_ID: result.run_ID, tankId: result.tankId,
+            step: 'AI_RECOMMENDATION', milestone: 'M5', outcome: 'ACHIEVED',
+            message: aiRecommendation,
+            timestamp: new Date().toISOString(), actor: 'AI'
+          });
+        }
       }
 
       const callbackUrl = process.env.N8N_APPROVAL_CALLBACK_URL;
@@ -1043,11 +1065,16 @@ function _fallbackReply(message, latestRun, tankSummary, tanks) {
       if (cls === 'RED' && pct > 500) {
         return `**Recommendation for ${name} (${specificTankId}):**\n\n` +
           `⚠️ Variance: **${pct.toFixed(2)}%** — Physical: ${phys.toFixed(3)} TO, Book: ${book.toFixed(3)} TO, Delta: ${delta.toFixed(3)} TO\n\n` +
-          `This extremely large variance (>${pct.toFixed(0)}%) is almost certainly a **data quality issue**, not a physical stock loss:\n\n` +
-          `1. The dip record in OIB_TANKDIP may be from a **previous period** (book stock was near zero at that time)\n` +
-          `2. The **RELSTOCK** (book stock) in the dip was not updated correctly when the dip was recorded\n` +
-          `3. A fresh dip needs to be recorded via **O4_TIGER** with current actual book stock\n\n` +
-          `**Action: Reject this posting** and ask the terminal operator to record a fresh dip in O4_TIGER.`;
+          `This extremely large variance (>${pct.toFixed(0)}%) is almost certainly a **stale dip data issue**, not a physical stock loss:\n\n` +
+          `1. The last dip recorded in **OIB_TANKDIP** may be from a previous period — the ATG has not updated recently\n` +
+          `2. The book stock has changed significantly since the last dip was taken\n` +
+          `3. The SAP physical inventory tolerance (OMJ2) of 100,000 USD may block posting even if approved\n\n` +
+          `**Recommended Actions:**\n` +
+          `1. **Reject this posting** in the Approval Queue\n` +
+          `2. Ask the terminal operator to record a **fresh dip in O4_TIGER** for tank ${name} (SOCNR: ${specificTankId}) with the current actual tank height measurement\n` +
+          `3. Once a fresh dip is recorded, trigger a new reconciliation run — the variance will reflect the correct current position\n` +
+          `4. If the variance remains large, ask the Basis team to check OMJ2 tolerance for company code 1710\n\n` +
+          `**Note:** The current measurement can only be obtained from the ATG system or by the terminal operator physically reading the tank level.`;
       }
 
       if (cls === 'RED' && pct <= 500) {
