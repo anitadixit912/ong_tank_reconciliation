@@ -301,11 +301,10 @@ async function _runInlineReconciliation(runId, runDate, actor) {
       await INSERT.into('tank.reconciliation.AuditLogEntry').entries({
         ID: cds.utils.uuid(), run_ID: runId, tankId: tank.tankId,
         step: 'VCF', milestone: 'M2', outcome: 'ACHIEVED',
-        message: 'M2.vcf: grossVolume=' + grossVolumeObserved.toFixed(3)
-          + ' vcfFactor=' + vcfFactor.toFixed(6)
-          + ' netVolume=' + netVolumePhysical.toFixed(3)
-          + ' source=' + vcfSource2
-          + (vcfSource2 === 'ISOIL_CORRECTED' ? ' (QUAN_SKU already VCF-corrected by IS-OIL, factor 1.0 is correct)' : ''),
+        message: 'M2.vcf: Physical quantity for tank ' + tank.tankId
+          + ' is ' + netVolumePhysical.toFixed(3) + ' ' + (dipData ? dipData.uom : 'TO')
+          + ' (as measured by the ATG tank gauge and recorded in IS-OIL).'
+          + ' No volume correction needed — IS-OIL already applies temperature/density correction before storing the measurement.',
         timestamp: new Date().toISOString(), actor
       });
 
@@ -350,11 +349,11 @@ async function _runInlineReconciliation(runId, runDate, actor) {
       // M3 audit entry with AI recommendation
       let m3AiNote = '';
       if (classification === 'RED') {
-        m3AiNote = ' | AI Recommendation: Variance of ' + deltaPercent.toFixed(2) + '% exceeds the RED threshold (' + (tank.toleranceFlagPct || 2.00) + '%). This tank requires supervisor approval before posting. Go to the Approval Queue, select a reason code and approve or reject.';
+        m3AiNote = '\n\n**AI Recommendation:** Variance of ' + deltaPercent.toFixed(2) + '% exceeds the RED threshold (' + (tank.toleranceFlagPct || 2.00) + '%). This tank requires supervisor approval before posting. Go to the Approval Queue, select a reason code and approve or reject.';
       } else if (classification === 'AMBER') {
-        m3AiNote = ' | AI Info: Variance of ' + deltaPercent.toFixed(2) + '% is within AMBER range (' + (tank.toleranceOkPct || 0.50) + '% – ' + (tank.toleranceFlagPct || 2.00) + '%). Auto-posting will be attempted. If not posted within 8 hours, it will auto-post on the next reconciliation run.';
+        m3AiNote = '\n\n**AI Info:** Variance of ' + deltaPercent.toFixed(2) + '% is within AMBER range (' + (tank.toleranceOkPct || 0.50) + '% – ' + (tank.toleranceFlagPct || 2.00) + '%). Auto-posting will be attempted. If not posted within 8 hours, it will auto-post on the next reconciliation run.';
       } else {
-        m3AiNote = ' | AI Info: Variance of ' + deltaPercent.toFixed(2) + '% is within GREEN tolerance (≤' + (tank.toleranceOkPct || 0.50) + '%). Auto-posting will be attempted.';
+        m3AiNote = '\n\n**AI Info:** Variance of ' + deltaPercent.toFixed(2) + '% is within GREEN tolerance (≤' + (tank.toleranceOkPct || 0.50) + '%). Auto-posting will be attempted.';
       }
 
       await INSERT.into('tank.reconciliation.AuditLogEntry').entries({
@@ -643,7 +642,7 @@ module.exports = class ReconciliationService extends cds.ApplicationService {
         message: 'M4.achieved: URGENT variance approved for tank ' + result.tankId + ' — approver=' + decidedBy
           + ' | Reason Code: ' + (comment ? (comment.match(/^\[(\w+)\]/) ? comment.match(/^\[(\w+)\]/)[1] : '–') : '–')
           + ' | Comment: ' + (comment ? comment.replace(/^\[\w+\]\s*/, '') : '–')
-          + ' | AI Info: Approval recorded. Goods movement posting (M5) will now be attempted.',
+          + '\n\n**AI Info:** Approval recorded. Goods movement posting (M5) will now be attempted.',
         timestamp: now, actor: decidedBy
       });
 
@@ -679,11 +678,11 @@ module.exports = class ReconciliationService extends cds.ApplicationService {
         const deltaPercent = parseFloat(result.deltaPercent || 0);
         let aiRecommendation = '';
         if (postResult.message && postResult.message.includes('Difference amount is too high')) {
-          aiRecommendation = ' | AI Recommendation: The posting was blocked because the variance amount exceeds the SAP maximum allowed limit (OMJ2 tolerance). The physical measurement recorded for tank ' + result.tankId + ' differs significantly from the SAP book stock. Action required: (1) Contact the terminal operator to verify the current physical tank reading and record a fresh measurement in O4_TIGER. (2) Trigger a new reconciliation run after the fresh measurement. (3) If the issue persists, contact the Basis team to review the OMJ2 tolerance limit for company code 1710, tolerance group 0001.';
+          aiRecommendation = '\n\n**AI Recommendation:** The posting was blocked because the variance amount exceeds the SAP maximum allowed limit (OMJ2 tolerance). The physical measurement recorded for tank ' + result.tankId + ' differs significantly from the SAP book stock. Action required: (1) Contact the terminal operator to verify the current physical tank reading and record a fresh measurement in O4_TIGER. (2) Trigger a new reconciliation run after the fresh measurement. (3) If the issue persists, contact the Basis team to review the OMJ2 tolerance limit for company code 1710, tolerance group 0001.';
         } else if (postResult.message && postResult.message.includes('Deficit')) {
-          aiRecommendation = ' | AI Recommendation: The posting failed because SAP found a stock deficit. This means the system is trying to reduce stock below zero. Possible causes: (1) A previous Physical Inventory document is still open and unposted for this tank — check transaction MI02 for open PI documents at plant ' + (result.plant || '1743') + ' and cancel any unposted ones. (2) The physical measurement recorded is lower than what SAP expects. Contact the terminal operator to verify the current tank reading and re-trigger the reconciliation.';
+          aiRecommendation = '\n\n**AI Recommendation:** The posting failed because SAP found a stock deficit. This means the system is trying to reduce stock below zero. Possible causes: (1) A previous Physical Inventory document is still open and unposted for this tank — check transaction MI02 for open PI documents at plant ' + (result.plant || '1743') + ' and cancel any unposted ones. (2) The physical measurement recorded is lower than what SAP expects. Contact the terminal operator to verify the current tank reading and re-trigger the reconciliation.';
         } else if (postResult.message && postResult.message.includes('OIH01')) {
-          aiRecommendation = ' | AI Recommendation: IS-OIL excise duty configuration missing. Ask Basis team to check OIH10/OIH01/OIH07 entries for company code 1710, plant ' + (result.plant || '1743') + '.';
+          aiRecommendation = '\n\n**AI Recommendation:** IS-OIL excise duty configuration missing. Ask Basis team to check OIH10/OIH01/OIH07 entries for company code 1710, plant ' + (result.plant || '1743') + '.';
         }
 
         await INSERT.into('tank.reconciliation.AuditLogEntry').entries({
@@ -729,7 +728,7 @@ module.exports = class ReconciliationService extends cds.ApplicationService {
         message: 'M4.achieved: URGENT variance rejected for tank ' + result.tankId + ' — approver=' + decidedBy
           + ' | Reason Code: ' + (comment ? (comment.match(/^\[(\w+)\]/) ? comment.match(/^\[(\w+)\]/)[1] : '–') : '–')
           + ' | Comment: ' + (comment ? comment.replace(/^\[\w+\]\s*/, '') : '–')
-          + ' | AI Info: Posting rejected. No goods movement will be posted. To re-process, trigger a new reconciliation run after correcting the underlying data.',
+          + '\n\n**AI Info:** Posting rejected. No goods movement will be posted. To re-process, trigger a new reconciliation run after correcting the underlying data.',
         timestamp: now, actor: decidedBy
       });
 
