@@ -119,10 +119,15 @@ async function _postTankDip(socnr, etmstm, quanSku, relstock, meins, material, d
       cds.log('s4').info('_postTankDip response body: ' + res.body.slice(0, 500));
       const payload = JSON.parse(res.body);
       const d = payload.d || {};
+      const postingResult = d.PostingResult || d.Postingresult || '';
+      // Check if ABAP returned an error inside a 201 response
+      if (postingResult.startsWith('ERROR')) {
+        return { success: false, message: postingResult };
+      }
       return {
         success:          true,
         materialDocument: d.MaterialDocument || d.Materialdocument || '',
-        message:          d.PostingResult || d.Postingresult || 'Posting completed'
+        message:          postingResult || 'Posting completed'
       };
     } else {
       let errMsg = 'HTTP ' + res.status;
@@ -275,7 +280,7 @@ async function _runInlineReconciliation(runId, runDate, actor) {
 
       // M2: VCF Correction — attempt Hydrocarbon Qty Conversion API, fallback to ASTM 1.0
       let vcfFactor  = 1.0;
-      let vcfSource2 = 'ASTM_FALLBACK';
+      let vcfSource2 = 'ISOIL_CORRECTED';
       try {
         const vcfApiUrl = process.env.VCF_API_URL;
         if (vcfApiUrl) {
@@ -300,7 +305,7 @@ async function _runInlineReconciliation(runId, runDate, actor) {
           + ' vcfFactor=' + vcfFactor.toFixed(6)
           + ' netVolume=' + netVolumePhysical.toFixed(3)
           + ' source=' + vcfSource2
-          + (vcfSource2 === 'ASTM_FALLBACK' ? ' (VCF_API_URL not configured — QUAN_SKU already VCF-corrected by IS-OIL, factor 1.0 is correct)' : ''),
+          + (vcfSource2 === 'ISOIL_CORRECTED' ? ' (QUAN_SKU already VCF-corrected by IS-OIL, factor 1.0 is correct)' : ''),
         timestamp: new Date().toISOString(), actor
       });
 
@@ -656,34 +661,23 @@ module.exports = class ReconciliationService extends cds.ApplicationService {
           postingStatus: 'FAILED',
           rejectionReason: postResult.message
         });
+        // AI Recommendation for large variance posting failures
+        const deltaPercent = parseFloat(result.deltaPercent || 0);
+        let aiRecommendation = '';
+        if (postResult.message && postResult.message.includes('Difference amount is too high')) {
+          aiRecommendation = ' | AI Recommendation: The posting was blocked because the variance amount exceeds the SAP maximum allowed limit (OMJ2 tolerance). The physical measurement recorded for tank ' + result.tankId + ' differs significantly from the SAP book stock. Action required: (1) Contact the terminal operator to verify the current physical tank reading and record a fresh measurement in O4_TIGER. (2) Trigger a new reconciliation run after the fresh measurement. (3) If the issue persists, contact the Basis team to review the OMJ2 tolerance limit for company code 1710, tolerance group 0001.';
+        } else if (postResult.message && postResult.message.includes('Deficit')) {
+          aiRecommendation = ' | AI Recommendation: The posting failed because SAP found a stock deficit. This means the system is trying to reduce stock below zero. Possible causes: (1) A previous Physical Inventory document is still open and unposted for this tank — check transaction MI02 for open PI documents at plant ' + (result.plant || '1743') + ' and cancel any unposted ones. (2) The physical measurement recorded is lower than what SAP expects. Contact the terminal operator to verify the current tank reading and re-trigger the reconciliation.';
+        } else if (postResult.message && postResult.message.includes('OIH01')) {
+          aiRecommendation = ' | AI Recommendation: IS-OIL excise duty configuration missing. Ask Basis team to check OIH10/OIH01/OIH07 entries for company code 1710, plant ' + (result.plant || '1743') + '.';
+        }
+
         await INSERT.into('tank.reconciliation.AuditLogEntry').entries({
           ID: cds.utils.uuid(), run_ID: result.run_ID, tankId: result.tankId,
           step: 'POSTING', milestone: 'M5', outcome: 'FAILED',
-          message: 'M5.failed: goods movement posting failed — ' + postResult.message,
+          message: 'M5.failed: goods movement posting failed — ' + postResult.message + ' (Physical=' + parseFloat(result.netVolumePhysical || 0).toFixed(3) + ' BookStock=' + parseFloat(result.bookStock || 0).toFixed(3) + ' Delta=' + parseFloat(result.delta || 0).toFixed(3) + ' ' + (result.uom || 'TO') + ' Delta%=' + parseFloat(result.deltaPercent || 0).toFixed(2) + '%)' + aiRecommendation,
           timestamp: new Date().toISOString(), actor: decidedBy
         });
-
-        // AI Recommendation for large variance posting failures
-        const deltaPercent = parseFloat(result.deltaPercent || 0);
-        let aiRecommendation = null;
-        if (postResult.message && postResult.message.includes('Difference amount is too high')) {
-          aiRecommendation = deltaPercent > 500
-            ? 'AI Recommendation: The variance of ' + deltaPercent.toFixed(2) + '% indicates the physical dip reading in OIB_TANKDIP has not been updated recently. The last recorded measurement does not reflect the current tank stock position. Action required: (1) Contact the terminal operator to take a new physical measurement of tank ' + result.tankId + ' and record it in O4_TIGER. (2) Once recorded, trigger a new reconciliation run. (3) If the variance is still large after a fresh measurement, contact the Basis team to review the OMJ2 tolerance limit for company code 1710.'
-            : 'AI Recommendation: The posting was blocked because the variance amount exceeds the SAP maximum allowed limit configured in OMJ2. Contact the Basis team to increase the physical inventory difference amount limit for company code 1710, tolerance group 0001.';
-        } else if (postResult.message && postResult.message.includes('Deficit')) {
-          aiRecommendation = 'AI Recommendation: The posting failed because SAP found a stock deficit. This means the system is trying to reduce stock below zero. Possible causes: (1) A previous Physical Inventory document is still open and unposted for this tank — check transaction MI02 for open PI documents at plant ' + (result.plant || '1743') + ' and cancel any unposted ones. (2) The physical measurement recorded is lower than what SAP expects. Contact the terminal operator to verify the current tank reading and re-trigger the reconciliation.';
-        } else if (postResult.message && postResult.message.includes('OIH01')) {
-          aiRecommendation = 'AI Recommendation: IS-OIL excise duty configuration missing. Ask Basis team to check OIH10/OIH01/OIH07 entries for company code 1710, plant ' + (result.plant || '1743') + '.';
-        }
-
-        if (aiRecommendation) {
-          await INSERT.into('tank.reconciliation.AuditLogEntry').entries({
-            ID: cds.utils.uuid(), run_ID: result.run_ID, tankId: result.tankId,
-            step: 'AI_RECOMMENDATION', milestone: 'M5', outcome: 'ACHIEVED',
-            message: aiRecommendation,
-            timestamp: new Date().toISOString(), actor: 'AI'
-          });
-        }
       }
 
       const callbackUrl = process.env.N8N_APPROVAL_CALLBACK_URL;
