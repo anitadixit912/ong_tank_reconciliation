@@ -281,6 +281,8 @@ async function _runInlineReconciliation(runId, runDate, actor) {
       // M2: VCF Correction — attempt Hydrocarbon Qty Conversion API, fallback to ASTM 1.0
       let vcfFactor  = 1.0;
       let vcfSource2 = 'ISOIL_CORRECTED';
+      let vcfTemperature = null;
+      let vcfDensity = null;
       try {
         const vcfApiUrl = process.env.VCF_API_URL;
         if (vcfApiUrl) {
@@ -289,8 +291,10 @@ async function _runInlineReconciliation(runId, runDate, actor) {
           const vcfRes = await _httpPost(vcfApiUrl, vcfPayload, { 'Content-Type': 'application/json' });
           if (vcfRes.status === 200) {
             const vcfData = JSON.parse(vcfRes.body);
-            vcfFactor  = vcfData.vcfFactor || 1.0;
-            vcfSource2 = 'API';
+            vcfFactor      = vcfData.vcfFactor || 1.0;
+            vcfTemperature = vcfData.temperature || null;
+            vcfDensity     = vcfData.density || null;
+            vcfSource2     = 'API';
           }
         }
       } catch (_) { /* ASTM fallback */ }
@@ -301,10 +305,20 @@ async function _runInlineReconciliation(runId, runDate, actor) {
       await INSERT.into('tank.reconciliation.AuditLogEntry').entries({
         ID: cds.utils.uuid(), run_ID: runId, tankId: tank.tankId,
         step: 'VCF', milestone: 'M2', outcome: 'ACHIEVED',
-        message: 'M2.vcf: Physical quantity for tank ' + tank.tankId
-          + ' is ' + netVolumePhysical.toFixed(3) + ' ' + (dipData ? dipData.uom : 'TO')
-          + ' (as measured by the ATG tank gauge and recorded in IS-OIL).'
-          + ' No volume correction needed — IS-OIL already applies temperature/density correction before storing the measurement.',
+        message: vcfSource2 === 'ISOIL_CORRECTED'
+          ? 'M2.vcf: Physical quantity for tank ' + tank.tankId
+            + ' is ' + netVolumePhysical.toFixed(3) + ' ' + (dipData ? dipData.uom : 'TO')
+            + ' (as measured by the ATG tank gauge and recorded in IS-OIL).'
+            + ' No volume correction needed — IS-OIL already applies temperature/density correction before storing the measurement.'
+          : 'M2.vcf: Volume correction applied for tank ' + tank.tankId
+            + ' — Gross volume from ATG: ' + grossVolumeObserved.toFixed(3) + ' ' + (dipData ? dipData.uom : 'TO')
+            + (vcfTemperature !== null ? ' — Temperature: ' + vcfTemperature + ' °C' : '')
+            + (vcfDensity !== null ? ' — Density: ' + vcfDensity + ' kg/m³' : '')
+            + ' — Volume Correction Factor (VCF): ' + vcfFactor.toFixed(6)
+            + ' (This factor corrects the gross observed volume to net standard volume at 15°C reference temperature)'
+            + ' — Net corrected volume: ' + netVolumePhysical.toFixed(3) + ' ' + (dipData ? dipData.uom : 'TO')
+            + ' — Correction = Gross × VCF = ' + grossVolumeObserved.toFixed(3) + ' × ' + vcfFactor.toFixed(6) + ' = ' + netVolumePhysical.toFixed(3)
+            + ' — Source: External VCF API.',
         timestamp: new Date().toISOString(), actor
       });
 
