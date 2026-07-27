@@ -767,8 +767,23 @@ module.exports = class ReconciliationService extends cds.ApplicationService {
       let tanks       = [];
 
       if (latestRun) {
-        tanks   = await SELECT.from('tank.reconciliation.TankResult')
+        tanks = await SELECT.from('tank.reconciliation.TankResult')
           .where({ run_ID: latestRun.ID }).orderBy({ deltaPercent: 'desc' });
+
+        // Fetch approval records for this run and attach to tanks
+        const approvals = await SELECT.from('tank.reconciliation.ApprovalRecord')
+          .where({ run_ID: latestRun.ID });
+        tanks = tanks.map(t => {
+          const approval = approvals.find(a => a.tankResult_ID === t.ID);
+          if (approval) {
+            const reasonMatch = (approval.comment || '').match(/^\[(\d+)\]/);
+            t._reasonCode = reasonMatch ? reasonMatch[1] : '–';
+            t._approvalComment = reasonMatch ? approval.comment.replace(/^\[\d+\]\s*/, '') : (approval.comment || '–');
+            t._decidedBy = approval.decidedBy;
+            t._decision = approval.decision;
+          }
+          return t;
+        });
         const urgent       = tanks.filter(t => t.classification === 'RED');
         const flagged      = tanks.filter(t => t.classification === 'FLAG');
         const pendingCount = tanks.filter(t => t.classification === 'RED' && t.postingStatus === 'PENDING').length;
@@ -1103,16 +1118,31 @@ function _fallbackReply(message, latestRun, tankSummary, tanks) {
   // Specific tank status query — show status if NOT asking for recommendation
   if (specificTank && !q.includes('recommend') && !q.includes('advice') && !q.includes('suggest') && !q.includes('what should')) {
     const pct = parseFloat(specificTank.deltaPercent || 0);
-    return `**${specificTank.tankName || specificTankId}** (${specificTankId}):\n` +
+    const tankId = specificTank.tankId || specificTankId || '–';
+    let postingNote = '';
+    if (specificTank.postingStatus === 'FAILED') {
+      postingNote = '\n- **Reason:** Posting failed — ' + (specificTank.rejectionReason || 'see audit trail for details') +
+        '\n- **Action:** Check the Audit Trail (M5 entry) for the AI Recommendation on how to resolve this.';
+    }
+    return `**${specificTank.tankName || tankId}** (${tankId}):\n` +
       `- Classification: **${specificTank.classification}**\n` +
-      `- Physical: ${parseFloat(specificTank.netVolumePhysical || 0).toFixed(3)} ${specificTank.meins || 'TO'}\n` +
-      `- Book Stock: ${parseFloat(specificTank.bookStock || 0).toFixed(3)} ${specificTank.meins || 'TO'}\n` +
+      `- Physical: ${parseFloat(specificTank.netVolumePhysical || 0).toFixed(3)} TO\n` +
+      `- Book Stock: ${parseFloat(specificTank.bookStock || 0).toFixed(3)} TO\n` +
       `- Delta: ${parseFloat(specificTank.delta || 0).toFixed(3)} (${pct.toFixed(4)}%)\n` +
-      `- Posting Status: ${specificTank.postingStatus || 'PENDING'}\n` +
-      `- VCF Source: ${specificTank.vcfSource || 'N/A'}`;
+      `- Posting Status: **${specificTank.postingStatus || 'PENDING'}**` +
+      postingNote;
   }
 
   // Standard queries — each gives a different focused answer
+  if (q.includes('reason code') || q.includes('reason for') || q.includes('why approved') || q.includes('why rejected')) {
+    const actionedTanks = tanks.filter(t => t._decision);
+    if (actionedTanks.length === 0) return `No tanks have been approved or rejected yet in the latest run (${latestRun.runDate}).`;
+    return `**Approval decisions in run ${latestRun.runDate}:**\n\n` +
+      actionedTanks.map(t =>
+        `- **${t.tankName || t.tankId}**: ${t._decision} by ${t._decidedBy}\n  Reason Code: **${t._reasonCode}** — ${t._approvalComment}`
+      ).join('\n');
+  }
+
   if (q.includes('urgent') || q.includes('critical')) {
     const urgentTanks = tanks.filter(t => t.classification === 'RED');
     const pendingTanks = urgentTanks.filter(t => t.postingStatus === 'PENDING');
