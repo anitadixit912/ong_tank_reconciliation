@@ -4,6 +4,24 @@ import { fetchRun } from '../api.js';
 import StatusBadge from '../components/StatusBadge.jsx';
 import DeltaBar from '../components/DeltaBar.jsx';
 
+function FormattedMessage({ text }) {
+  if (!text) return <span>–</span>;
+  return (
+    <span>
+      {text.split('\n\n').map((para, pi) => (
+        <span key={pi}>
+          {pi > 0 && <br />}
+          {para.split(/(\*\*[^*]+\*\*)/).map((part, i) =>
+            part.startsWith('**') && part.endsWith('**')
+              ? <strong key={i}>{part.slice(2, -2)}</strong>
+              : <span key={i}>{part}</span>
+          )}
+        </span>
+      ))}
+    </span>
+  );
+}
+
 export default function TankDetail() {
   const { runId } = useParams();
   const [run, setRun] = useState(null);
@@ -184,7 +202,7 @@ export default function TankDetail() {
                     <td>{e.step}</td>
                     <td>{e.tankId || '–'}</td>
                     <td><StatusBadge value={e.outcome} /></td>
-                    <td style={{ fontSize: '0.8rem' }}>{e.message}</td>
+                    <td style={{ fontSize: '0.8rem' }}><FormattedMessage text={e.message} /></td>
                     <td>{e.actor || '–'}</td>
                   </tr>
                 ))}

@@ -2,6 +2,25 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { fetchAuditLog } from '../api.js';
 import StatusBadge from '../components/StatusBadge.jsx';
 
+// Renders message with **bold** and \n\n as new paragraphs
+function FormattedMessage({ text }) {
+  if (!text) return <span>–</span>;
+  return (
+    <span>
+      {text.split('\n\n').map((para, pi) => (
+        <span key={pi}>
+          {pi > 0 && <br />}
+          {para.split(/(\*\*[^*]+\*\*)/).map((part, i) =>
+            part.startsWith('**') && part.endsWith('**')
+              ? <strong key={i}>{part.slice(2, -2)}</strong>
+              : <span key={i}>{part}</span>
+          )}
+        </span>
+      ))}
+    </span>
+  );
+}
+
 const MILESTONES = ['', 'M1', 'M2', 'M3', 'M4', 'M5', 'M6'];
 const OUTCOMES   = ['', 'ACHIEVED', 'FAILED'];
 
@@ -124,7 +143,7 @@ export default function AuditTrail() {
                   <td>{e.tankId || '–'}</td>
                   <td><StatusBadge value={e.outcome} /></td>
                   <td>{e.actor || '–'}</td>
-                  <td style={{ fontSize: '0.8rem', color: '#495057' }}>{e.message}</td>
+                  <td style={{ fontSize: '0.8rem', color: '#495057' }}><FormattedMessage text={e.message} /></td>
                 </tr>
               ))}
             </tbody>
