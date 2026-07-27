@@ -427,24 +427,25 @@ Step 3: BAPI_MATPHYSINV_POSTDIFF
 <h1 id="status">12. Current Status &amp; Known Limitations</h1>
 <table>
   <tr><th>Item</th><th>Status</th><th>Notes</th></tr>
-  <tr><td>M1 Data Ingestion</td><td><span class="badge-green">✅ Complete</span></td><td>Live dip from OIB_TANKDIP via ZTANK_DIP_SRV_SRV</td></tr>
-  <tr><td>M2 VCF Correction</td><td><span class="badge-green">✅ Complete</span></td><td>QUAN_SKU already VCF-corrected by IS-OIL — factor 1.0 correct</td></tr>
-  <tr><td>M3 Variance Calculation</td><td><span class="badge-green">✅ Complete</span></td><td>GREEN/AMBER/RED with configurable thresholds</td></tr>
-  <tr><td>M4 Approval Workflow</td><td><span class="badge-green">✅ Complete</span></td><td>Reason codes, license check, high variance warning</td></tr>
-  <tr><td>M5 Goods Movement Posting</td><td><span class="badge-green">✅ Complete</span></td><td>PI BAPIs implemented — dip timestamp as count date, material doc stored, reason codes from T157D</td></tr>
-  <tr><td>M6 Alerts &amp; Notifications</td><td><span class="badge-green">✅ Complete</span></td><td>Teams webhook + BTP ANS + in-app bell</td></tr>
+  <tr><td>M1 Data Ingestion</td><td><span class="badge-green">✅ Complete</span></td><td>Live dip from OIB_TANKDIP via ZTANK_DIP_SRV_SRV. Non-standard input detection (zero qty, >500k, >1000% variance).</td></tr>
+  <tr><td>M2 VCF Correction</td><td><span class="badge-green">✅ Complete</span></td><td>QUAN_SKU already VCF-corrected by IS-OIL — factor 1.0 correct. Source shown as ISOIL_CORRECTED in audit.</td></tr>
+  <tr><td>M3 Variance Calculation</td><td><span class="badge-green">✅ Complete</span></td><td>Delta = RELSTOCK − QUAN_SKU. Delta% = |Delta|/QUAN_SKU × 100. GREEN/AMBER/RED with configurable thresholds per tank.</td></tr>
+  <tr><td>M4 Approval Workflow</td><td><span class="badge-green">✅ Complete</span></td><td>Dynamic reason codes from T157D/T157E. Reason code mandatory for RED. License check, high variance warning.</td></tr>
+  <tr><td>M5 Goods Movement Posting</td><td><span class="badge-green">✅ Complete</span></td><td>PI BAPIs: CREATE → COUNT → POSTDIFF. Dip timestamp as count date. Material doc hyperlink to OGS Fiori. AI recommendation on failure.</td></tr>
+  <tr><td>M6 Alerts &amp; Notifications</td><td><span class="badge-green">✅ Complete</span></td><td>Teams webhook + BTP ANS + in-app bell. AMBER auto-post after 8 hours on next run trigger.</td></tr>
   <tr><td>Authentication</td><td><span class="badge-green">✅ Complete</span></td><td>XSUAA via AppRouter</td></tr>
   <tr><td>Role-based Access</td><td><span class="badge-green">✅ Complete</span></td><td>4 roles: User, Approver, Admin, OGSIntegration</td></tr>
-  <tr><td>AI Chat Assistant</td><td><span class="badge-green">✅ Complete</span></td><td>SAP AI Core (GPT-4o) with fallback</td></tr>
+  <tr><td>AI Chat Assistant</td><td><span class="badge-green">✅ Complete</span></td><td>SAP AI Core (GPT-4o) with fallback. Recommendations for stale dip, tolerance errors, IS-OIL config issues.</td></tr>
+  <tr><td>AI Recommendations in Audit</td><td><span class="badge-green">✅ Complete</span></td><td>M5 failure messages include Physical, BookStock, Delta values + actionable AI recommendation.</td></tr>
   <tr><td>Non-Standard Input Detection</td><td><span class="badge-green">✅ Complete</span></td><td>4 checks at M1 ingestion</td></tr>
   <tr><td>License Constraint Check</td><td><span class="badge-green">✅ Complete</span></td><td>Inactive tank blocking, high variance warning</td></tr>
   <tr><td>OGS M2M Integration</td><td><span class="badge-green">✅ Complete</span></td><td>OGSIntegration role for system-to-system calls</td></tr>
   <tr><td>Trend Chart</td><td><span class="badge-green">✅ Complete</span></td><td>30-day delta history per tank</td></tr>
+  <tr><td>Dip Timestamp in UI</td><td><span class="badge-green">✅ Complete</span></td><td>Dip date/time shown in Run Detail Tank Results table</td></tr>
+  <tr><td>Audit Trail Date Filter</td><td><span class="badge-green">✅ Complete</span></td><td>Date From/To filter added to Audit Trail page</td></tr>
+  <tr><td>Fiori Launchpad Tile</td><td><span class="badge-green">✅ Complete</span></td><td>Static tile on OGS/650 Fiori Launchpad navigating to CAP app Approval Queue</td></tr>
+  <tr><td>Material Document Hyperlink</td><td><span class="badge-green">✅ Complete</span></td><td>Clickable link to OGS Fiori for posted material documents</td></tr>
 </table>
-
-<div class="warning-box">
-  <strong>M5 Remaining Blocker:</strong> OIH10 wildcard entry <code>1710/****/99/UT</code> takes priority over plant-specific entry <code>1710/1743/01/TA</code>. Basis team needs to delete or change the <code>99/UT</code> wildcard. All other IS-OIL configuration (OIH01, OIH07) is correctly in place.
-</div>
 
 <hr style="margin-top:40px;border:1px solid #ccc"/>
 <p style="text-align:center;color:#888;font-size:9pt">
