@@ -347,6 +347,16 @@ async function _runInlineReconciliation(runId, runDate, actor) {
         dipTimestamp: dipData ? (dipData.timestamp || '') : ''
       });
 
+      // M3 audit entry with AI recommendation
+      let m3AiNote = '';
+      if (classification === 'RED') {
+        m3AiNote = ' | AI Recommendation: Variance of ' + deltaPercent.toFixed(2) + '% exceeds the RED threshold (' + (tank.toleranceFlagPct || 2.00) + '%). This tank requires supervisor approval before posting. Go to the Approval Queue, select a reason code and approve or reject.';
+      } else if (classification === 'AMBER') {
+        m3AiNote = ' | AI Info: Variance of ' + deltaPercent.toFixed(2) + '% is within AMBER range (' + (tank.toleranceOkPct || 0.50) + '% – ' + (tank.toleranceFlagPct || 2.00) + '%). Auto-posting will be attempted. If not posted within 8 hours, it will auto-post on the next reconciliation run.';
+      } else {
+        m3AiNote = ' | AI Info: Variance of ' + deltaPercent.toFixed(2) + '% is within GREEN tolerance (≤' + (tank.toleranceOkPct || 0.50) + '%). Auto-posting will be attempted.';
+      }
+
       await INSERT.into('tank.reconciliation.AuditLogEntry').entries({
         ID: cds.utils.uuid(), run_ID: runId, tankId: tank.tankId,
         step: 'VARIANCE', milestone: 'M3', outcome: 'ACHIEVED',
@@ -356,7 +366,8 @@ async function _runInlineReconciliation(runId, runDate, actor) {
           + ' delta=' + delta.toFixed(3)
           + ' (' + deltaPercent.toFixed(4) + '%)'
           + ' class=' + classification
-          + ' source=' + s4Source,
+          + ' source=' + s4Source
+          + m3AiNote,
         timestamp: new Date().toISOString(), actor
       });
 
@@ -629,7 +640,10 @@ module.exports = class ReconciliationService extends cds.ApplicationService {
       await INSERT.into('tank.reconciliation.AuditLogEntry').entries({
         ID: cds.utils.uuid(), run_ID: result.run_ID, tankId: result.tankId,
         step: 'APPROVAL', milestone: 'M4', outcome: 'ACHIEVED',
-        message: 'M4.achieved: URGENT variance approved for tank ' + result.tankId + ' — approver=' + decidedBy,
+        message: 'M4.achieved: URGENT variance approved for tank ' + result.tankId + ' — approver=' + decidedBy
+          + ' | Reason Code: ' + (comment ? (comment.match(/^\[(\w+)\]/) ? comment.match(/^\[(\w+)\]/)[1] : '–') : '–')
+          + ' | Comment: ' + (comment ? comment.replace(/^\[\w+\]\s*/, '') : '–')
+          + ' | AI Info: Approval recorded. Goods movement posting (M5) will now be attempted.',
         timestamp: now, actor: decidedBy
       });
 
@@ -712,7 +726,10 @@ module.exports = class ReconciliationService extends cds.ApplicationService {
       await INSERT.into('tank.reconciliation.AuditLogEntry').entries({
         ID: cds.utils.uuid(), run_ID: result.run_ID, tankId: result.tankId,
         step: 'APPROVAL', milestone: 'M4', outcome: 'ACHIEVED',
-        message: 'M4.achieved: URGENT variance rejected for tank ' + result.tankId + ' — approver=' + decidedBy + ', reason: ' + comment,
+        message: 'M4.achieved: URGENT variance rejected for tank ' + result.tankId + ' — approver=' + decidedBy
+          + ' | Reason Code: ' + (comment ? (comment.match(/^\[(\w+)\]/) ? comment.match(/^\[(\w+)\]/)[1] : '–') : '–')
+          + ' | Comment: ' + (comment ? comment.replace(/^\[\w+\]\s*/, '') : '–')
+          + ' | AI Info: Posting rejected. No goods movement will be posted. To re-process, trigger a new reconciliation run after correcting the underlying data.',
         timestamp: now, actor: decidedBy
       });
 
@@ -1119,6 +1136,31 @@ function _fallbackReply(message, latestRun, tankSummary, tanks) {
   if (specificTank && !q.includes('recommend') && !q.includes('advice') && !q.includes('suggest') && !q.includes('what should')) {
     const pct = parseFloat(specificTank.deltaPercent || 0);
     const tankId = specificTank.tankId || specificTankId || '–';
+
+    // If asking about reason code for a specific tank
+    if (q.includes('reason code') || q.includes('reason for') || q.includes('why approved') || q.includes('why rejected')) {
+      if (specificTank._decision) {
+        let postingNote = '';
+        if (specificTank.postingStatus === 'FAILED') {
+          postingNote = `\n- Posting Status: **FAILED** — ${specificTank.rejectionReason || 'see audit trail'}\n- **Action:** Check the Audit Trail (M5 entry) for the AI Recommendation on how to resolve this.`;
+        } else if (specificTank.postingStatus === 'POSTED') {
+          postingNote = `\n- Posting Status: **POSTED** ✅ — Material Document: ${specificTank.materialDocumentId || 'see audit trail'}`;
+        } else if (specificTank.postingStatus === 'REJECTED') {
+          postingNote = `\n- Posting Status: **REJECTED** ✗`;
+        }
+        return `**Reason code for ${specificTank.tankName || tankId}:**\n\n` +
+          `- Decision: **${specificTank._decision}** by ${specificTank._decidedBy}\n` +
+          `- Reason Code: **${specificTank._reasonCode}**\n` +
+          `- Comment: ${specificTank._approvalComment}` +
+          postingNote;
+      } else {
+        return `No approval decision recorded yet for **${specificTank.tankName || tankId}**.\n` +
+          `Current status: **${specificTank.postingStatus}**\n` +
+          (specificTank.postingStatus === 'FAILED'
+            ? `The posting failed — no reason code was selected as the approval did not complete successfully.`
+            : `The tank is still pending approval in the Approval Queue.`);
+      }
+    }
     let postingNote = '';
     if (specificTank.postingStatus === 'FAILED') {
       postingNote = '\n- **Reason:** Posting failed — ' + (specificTank.rejectionReason || 'see audit trail for details') +
