@@ -164,7 +164,7 @@ export default function TankDetail() {
                       )}
                     </td>
                     <td>{t.materialDocumentId
-                      ? <a href={`https://10.236.250.15:44301/sap/bc/ui2/flp?sap-client=650&sap-language=EN#MaterialDocument-displayFactSheet?MaterialDocument=${t.materialDocumentId}&MaterialDocumentYear=${new Date().getFullYear()}`}
+                      ? <a href={`https://10.236.250.15:44301/sap/bc/gui/sap/its/webgui?~transaction=MIGO&MIGO_ACTION=DISPLAY&MIGO_OBJECT=MAT_DOC&MBLNR=${String(parseInt(t.materialDocumentId, 10))}&MJAHR=${new Date().getFullYear()}&sap-client=650&sap-language=EN`}
                            target="_blank" rel="noreferrer" style={{ color: '#0070f3' }}>
                           📄 {t.materialDocumentId}
                         </a>

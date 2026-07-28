@@ -122,9 +122,9 @@ ZTANK_POST_SRV_SRV             + Audit trail
 ## End-to-End Workflow
 
 1. **Trigger Run** — Dashboard → select date → ⚡ Trigger Run
-   - Reads live dips from IS-OIL `OIB_TANKDIP`
+   - Reads live dips from IS-OIL `OIB_TANKDIP` (RELSTOCK = physical, QUAN_SKU = book stock)
    - Computes delta per tank (Physical − Book Stock)
-   - Classifies: OK / FLAG / URGENT
+   - Classifies: 🟢 GREEN (≤0.5%) / 🟡 AMBER (0.5-2%) / 🔴 RED (>2%)
 
 2. **Dashboard Updates** — New run in table, 🔔 notification bell updates
 
@@ -142,12 +142,12 @@ ZTANK_POST_SRV_SRV             + Audit trail
 
 | Milestone | Status | Notes |
 |-----------|--------|-------|
-| M1 — Data Ingestion | ✅ Working | Live IS-OIL data from OGS/650 |
-| M2 — VCF Correction | ✅ Working | VCF factor applied |
-| M3 — Variance Calculation | ✅ Working | Live delta with OK/FLAG/URGENT |
-| M4 — Approval Decision | ✅ Working | Full governance flow |
-| M5 — Goods Movement Posting | ⚠️ Partial | Architecture built; IS-OIL posting config required |
-| M6 — Report & Alert Distribution | ✅ Working | Webhook notifications working |
+| M1 — Data Ingestion | ✅ Complete | Live IS-OIL data from OIB_TANKDIP via ZTANK_DIP_SRV_SRV |
+| M2 — VCF Correction | ✅ Complete | QUAN_SKU already VCF-corrected by IS-OIL — factor 1.0 correct |
+| M3 — Variance Calculation | ✅ Complete | GREEN/AMBER/RED classification with AI recommendations in audit |
+| M4 — Approval Decision | ✅ Complete | Dynamic reason codes from T157D, reason code mandatory for RED |
+| M5 — Goods Movement Posting | ✅ Complete | PI BAPIs: CREATE → COUNT → POSTDIFF. Dip timestamp as count date. Material doc hyperlink to OGS. AI recommendation on failure. |
+| M6 — Report & Alert Distribution | ✅ Complete | Teams webhook + BTP ANS + in-app bell. AMBER auto-post after 8 hours. |
 
 ---
 
