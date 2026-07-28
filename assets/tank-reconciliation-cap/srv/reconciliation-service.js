@@ -569,7 +569,7 @@ module.exports = class ReconciliationService extends cds.ApplicationService {
       const runId   = cds.utils.uuid();
       const now     = new Date().toISOString();
       const runTime = now.slice(11, 19); // HH:MM:SS
-      const actor   = (req.user && req.user.id) || 'scheduler';
+      const actor   = (req.user && (req.user.attr?.email || req.user.id)) || 'scheduler';
 
       // ── AMBER 8-hour auto-post check ─────────────────────────────────────
       // Find AMBER tanks still in AUTO_POSTING from runs completed >8 hours ago
@@ -665,13 +665,13 @@ module.exports = class ReconciliationService extends cds.ApplicationService {
         await INSERT.into('tank.reconciliation.AuditLogEntry').entries({
           ID: cds.utils.uuid(), run_ID: result.run_ID, tankId: result.tankId,
           step: 'APPROVAL', milestone: 'M4', outcome: 'ACHIEVED',
-          message: 'M4.license_check: HIGH VARIANCE WARNING — ' + deltaPercent.toFixed(0) + '% variance approved by ' + ((req.user && req.user.id) || 'supervisor') + '. Verify data quality before posting.',
-          timestamp: now2, actor: (req.user && req.user.id) || 'supervisor'
+          message: 'M4.license_check: HIGH VARIANCE WARNING — ' + deltaPercent.toFixed(0) + '% variance approved by ' + ((req.user && (req.user.attr?.email || req.user.id)) || 'supervisor') + '. Verify data quality before posting.',
+          timestamp: now2, actor: (req.user && (req.user.attr?.email || req.user.id)) || 'supervisor'
         });
       }
 
       const now       = new Date().toISOString();
-      const decidedBy = (req.user && req.user.id) || 'supervisor';
+      const decidedBy = (req.user && (req.user.attr?.email || req.user.id)) || 'supervisor';
 
       await INSERT.into('tank.reconciliation.ApprovalRecord').entries({
         ID: cds.utils.uuid(), tankResult_ID: tankResultId, run_ID: result.run_ID,
@@ -755,7 +755,7 @@ module.exports = class ReconciliationService extends cds.ApplicationService {
       if (result.postingStatus  !== 'PENDING') return req.reject(409, 'Tank is already in status: ' + result.postingStatus);
 
       const now       = new Date().toISOString();
-      const decidedBy = (req.user && req.user.id) || 'supervisor';
+      const decidedBy = (req.user && (req.user.attr?.email || req.user.id)) || 'supervisor';
 
       await INSERT.into('tank.reconciliation.ApprovalRecord').entries({
         ID: cds.utils.uuid(), tankResult_ID: tankResultId, run_ID: result.run_ID,
@@ -792,7 +792,7 @@ module.exports = class ReconciliationService extends cds.ApplicationService {
       }
 
       const now   = new Date().toISOString();
-      const actor = (req.user && req.user.id) || 'system';
+      const actor = (req.user && (req.user.attr?.email || req.user.id)) || 'system';
 
       await UPDATE('tank.reconciliation.ReconciliationRun', runId).with({
         status: 'PENDING',
