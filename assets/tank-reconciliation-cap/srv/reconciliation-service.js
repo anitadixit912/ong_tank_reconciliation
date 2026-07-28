@@ -569,7 +569,7 @@ module.exports = class ReconciliationService extends cds.ApplicationService {
       const runId   = cds.utils.uuid();
       const now     = new Date().toISOString();
       const runTime = now.slice(11, 19); // HH:MM:SS
-      const actor   = (req.user && (req.user.attr?.email || req.user.id)) || 'scheduler';
+      const actor = (req.user && (req.user.attr?.email || req.user.id)) || 'scheduler';
 
       // ── AMBER 8-hour auto-post check ─────────────────────────────────────
       // Find AMBER tanks still in AUTO_POSTING from runs completed >8 hours ago
