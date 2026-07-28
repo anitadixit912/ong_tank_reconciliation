@@ -116,6 +116,12 @@ export async function fetchReasonCodes() {
   return Array.isArray(res) ? res : (res && res.value ? res.value : []);
 }
 
+// Open Nominations (live from TSW via OGS)
+export async function fetchOpenNominations() {
+  var res = await action('getOpenNominations', {});
+  return Array.isArray(res) ? res : (res && res.value ? res.value : []);
+}
+
 // Actions
 export async function triggerRun(runDate, plant) {
   var body = { runDate: runDate };

@@ -1,8 +1,66 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { Link } from 'react-router-dom';
-import { fetchPendingApprovals, approvePosting, rejectPosting, fetchReasonCodes } from '../api.js';
+import { fetchPendingApprovals, approvePosting, rejectPosting, fetchReasonCodes, fetchOpenNominations } from '../api.js';
 import StatusBadge from '../components/StatusBadge.jsx';
 import DeltaBar from '../components/DeltaBar.jsx';
+
+const ITEM_STATUS_MAP = {
+  '1': 'Planned', '2': 'Scheduled', '3': 'Accepted',
+  '4': 'Confirmed', '5': 'Partially Complete'
+};
+
+function NominationsModal({ nominations, onClose }) {
+  return (
+    <div style={{
+      position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+      background: 'rgba(0,0,0,0.5)', zIndex: 9999,
+      display: 'flex', alignItems: 'center', justifyContent: 'center'
+    }}>
+      <div style={{
+        background: '#fff', borderRadius: '8px', padding: '1.5rem',
+        width: '90%', maxWidth: '900px', maxHeight: '80vh',
+        display: 'flex', flexDirection: 'column'
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+          <h2 style={{ margin: 0, fontSize: '1.1rem' }}>📋 Open TSW Nominations for USMOB ({nominations.length})</h2>
+          <button className="btn btn-secondary" onClick={onClose}>✕ Close</button>
+        </div>
+        <div style={{ overflowY: 'auto', flex: 1 }}>
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Nomination #</th>
+                <th>Item</th>
+                <th>Material</th>
+                <th>Quantity</th>
+                <th>UoM</th>
+                <th>Scheduled Date</th>
+                <th>Type</th>
+                <th>Item Status</th>
+                <th>Header Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {nominations.map((n, i) => (
+                <tr key={i}>
+                  <td><strong>{n.Nominationnumber?.replace(/^0+/, '')}</strong></td>
+                  <td>{n.Itemnumber?.replace(/^0+/, '')}</td>
+                  <td>{n.Demandmaterial || '–'}</td>
+                  <td style={{ textAlign: 'right' }}>{parseFloat(n.Nominatedqty || 0).toLocaleString()}</td>
+                  <td>{n.Quantityunit}</td>
+                  <td>{n.Scheduleddate}</td>
+                  <td>{n.Itemtype === 'O' ? '📤 Origin' : n.Itemtype === 'D' ? '📥 Destination' : n.Itemtype}</td>
+                  <td>{ITEM_STATUS_MAP[n.Itemstatus] || n.Itemstatus}</td>
+                  <td>{n.Nomstatus === '1' ? '🟢 Open' : n.Nomstatus === '2' ? '🟡 Transmitted' : '🔴 Closed'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export default function ApprovalQueue() {
   const [items, setItems] = useState([]);
@@ -14,6 +72,12 @@ export default function ApprovalQueue() {
   const [acting, setActing] = useState(false);
   const [actionMsg, setActionMsg] = useState(null);
   const [reasonCodes, setReasonCodes] = useState([]);
+  const [nominations, setNominations] = useState([]);
+  const [showNominations, setShowNominations] = useState(false);
+
+  useEffect(() => {
+    fetchOpenNominations().then(noms => setNominations(noms)).catch(() => setNominations([]));
+  }, []);
 
   useEffect(() => {
     fetchReasonCodes().then(codes => {
@@ -237,10 +301,70 @@ export default function ApprovalQueue() {
                   ✗ Reject
                 </button>
               </div>
+
+              {/* Open Nominations for this tank's material */}
+              {nominations.length > 0 && (() => {
+                const tankNoms = nominations.filter(n =>
+                  n.Demandmaterial === selected.materialId ||
+                  n.Locationid === 'USMOB'
+                );
+                if (tankNoms.length === 0) return null;
+                const preview = tankNoms.slice(0, 3);
+                return (
+                  <div style={{ marginTop: '0.75rem' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.4rem' }}>
+                      <div className="form-label" style={{ fontWeight: 600 }}>
+                        📋 Open TSW Nominations ({tankNoms.length})
+                      </div>
+                      <button className="btn btn-outline" style={{ fontSize: '0.7rem' }}
+                              onClick={() => setShowNominations(true)}>
+                        View All
+                      </button>
+                    </div>
+                    <table style={{ width: '100%', fontSize: '0.72rem', borderCollapse: 'collapse' }}>
+                      <thead>
+                        <tr style={{ background: '#f0f4ff' }}>
+                          <th style={{ padding: '3px 5px', textAlign: 'left' }}>Nom #</th>
+                          <th style={{ padding: '3px 5px', textAlign: 'left' }}>Material</th>
+                          <th style={{ padding: '3px 5px', textAlign: 'right' }}>Qty</th>
+                          <th style={{ padding: '3px 5px', textAlign: 'left' }}>Date</th>
+                          <th style={{ padding: '3px 5px', textAlign: 'left' }}>Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {preview.map((n, i) => (
+                          <tr key={i} style={{ borderBottom: '1px solid #eee' }}>
+                            <td style={{ padding: '3px 5px' }}>{n.Nominationnumber?.replace(/^0+/, '')}</td>
+                            <td style={{ padding: '3px 5px' }}>{n.Demandmaterial || '–'}</td>
+                            <td style={{ padding: '3px 5px', textAlign: 'right' }}>{parseFloat(n.Nominatedqty || 0).toLocaleString()} {n.Quantityunit}</td>
+                            <td style={{ padding: '3px 5px' }}>{n.Scheduleddate}</td>
+                            <td style={{ padding: '3px 5px' }}>{ITEM_STATUS_MAP[n.Itemstatus] || n.Itemstatus}</td>
+                          </tr>
+                        ))}
+                        {tankNoms.length > 3 && (
+                          <tr>
+                            <td colSpan="5" style={{ padding: '3px 5px', color: '#888', fontSize: '0.7rem' }}>
+                              ... and {tankNoms.length - 3} more — click View All
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                );
+              })()}
             </div>
           </div>
         )}
       </div>
+
+      {/* Nominations Modal */}
+      {showNominations && (
+        <NominationsModal
+          nominations={nominations}
+          onClose={() => setShowNominations(false)}
+        />
+      )}
     </div>
   );
 }

@@ -206,6 +206,34 @@ async function _fetchReasonCodes() {
   }
 }
 
+/**
+ * Fetch open nominations from ZTANK_DIP_SRV_SRV/NominationSet via OGS.
+ */
+async function _fetchOpenNominations() {
+  try {
+    const cfg     = await _resolveDestination(S4HANA_DESTINATION);
+    const baseUrl = (cfg.URL || cfg.url || '').replace(/\/$/, '');
+    if (!baseUrl) return [];
+
+    const authHeader = _basicAuthHeader(cfg);
+    const path = '/sap/opu/odata/sap/ZTANK_DIP_SRV_SRV/NominationSet?$format=json';
+    const headers = { Accept: 'application/json' };
+    if (authHeader) headers['Authorization'] = authHeader;
+
+    const proxyOpts = cfg._proxyHost ? { host: cfg._proxyHost, port: cfg._proxyPort, token: cfg._proxyToken, locationId: cfg._locationId } : null;
+    const res = await _httpGet(baseUrl + path, headers, proxyOpts);
+    if (res.status !== 200) {
+      cds.log('s4').warn('NominationSet returned ' + res.status);
+      return [];
+    }
+    const payload = JSON.parse(res.body);
+    return (payload.d && payload.d.results) ? payload.d.results : [];
+  } catch (err) {
+    cds.log('s4').warn('Failed to fetch nominations: ' + err.message);
+    return [];
+  }
+}
+
 /** Build a Basic Authorization header value from destination config (BasicAuthentication). */
 function _basicAuthHeader(cfg) {
   const user = cfg.User || cfg.user || '';
@@ -857,6 +885,12 @@ module.exports = class ReconciliationService extends cds.ApplicationService {
     this.on('getReasonCodes', async (req) => {
       const codes = await _fetchReasonCodes();
       return codes;
+    });
+
+    // ── getOpenNominations ───────────────────────────────────────────────────
+    this.on('getOpenNominations', async (req) => {
+      const nominations = await _fetchOpenNominations();
+      return nominations;
     });
 
     return super.init();

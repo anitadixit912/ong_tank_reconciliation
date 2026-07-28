@@ -89,5 +89,20 @@ service ReconciliationService @(path: '/reconciliation')
     Bwart : String(3);
     Grtxt : String(40);
   };
+
+  // ─── Open Nominations (live from TSW via OGS) ─────────────────────────────
+  action getOpenNominations() returns array of {
+    Nominationnumber : String(20);
+    Itemnumber       : String(10);
+    Itemstatus       : String(1);
+    Itemtype         : String(2);
+    Scheduleddate    : String(10);
+    Locationid       : String(10);
+    Demandmaterial   : String(40);
+    Nominatedqty     : Decimal(13,3);
+    Quantityunit     : String(3);
+    Nomstatus        : String(1);
+    Transportsystem  : String(10);
+  };
 }
 
