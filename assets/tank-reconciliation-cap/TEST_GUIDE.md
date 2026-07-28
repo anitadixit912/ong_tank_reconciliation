@@ -222,5 +222,5 @@
 |------|--------|-------|
 | M5 Goods Movement Posting | ✅ Complete | PI BAPIs implemented — BAPI_MATPHYSINV_CREATE → COUNT → POSTDIFF. Dip timestamp used as count date. Material doc returned and stored. |
 | VCF Calculation | ✅ Complete | QUAN_SKU in OIB_TANKDIP is already VCF-corrected by IS-OIL — factor 1.0 is correct, no external API needed |
-| Authentication | ✅ Working | XSUAA via AppRouter |
+| Open TSW Nominations | ✅ Complete | NominationSet OData in ZTANK_DIP_SRV_SRV — shows in Approval Queue review panel with View All modal |
 | Role-based access | ✅ Working | Approvals: Supervisor only, Config: Admin only |
