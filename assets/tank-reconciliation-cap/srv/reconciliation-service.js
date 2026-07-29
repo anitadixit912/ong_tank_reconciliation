@@ -45,8 +45,8 @@ async function _fetchTankDip(socnr) {
 
     const r = records[0];
     return {
-      physicalQty : parseFloat(r.Relstock || '0'),
-      bookStock   : parseFloat(r.QuanSku  || '0'),
+      physicalQty : parseFloat(r.QuanSku  || '0'),
+      bookStock   : parseFloat(r.Relstock || '0'),
       uom         : r.Meins || '',
       timestamp   : r.Etmstm || '',
       volumeLvc   : parseFloat(r.QuanLvc || '0')
