@@ -5,6 +5,7 @@
  * over the last 30 completed reconciliation runs.
  */
 import React, { useEffect, useState, useCallback } from 'react';
+import { Link } from 'react-router-dom';
 import { fetchVarianceTrend, fetchTankConfigurations } from '../api.js';
 import StatusBadge from '../components/StatusBadge.jsx';
 
@@ -91,6 +92,9 @@ export default function TrendChart() {
 
   return (
     <div>
+      <div style={{ marginBottom: '0.75rem' }}>
+        <Link to="/" style={{ color: '#0070f3', textDecoration: 'none', fontSize: '0.875rem' }}>← Dashboard</Link>
+      </div>
       <h1 className="page-title">30-Day Variance Trend</h1>
       <p style={{ color: '#6c757d', fontSize: '0.875rem', marginBottom: '1rem' }}>
         Delta % history per tank over the last {DAYS} days. Green band = OK tolerance (±0.25%).

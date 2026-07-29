@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import {
   FlexBox,
   Title,
@@ -76,6 +77,9 @@ export default function AiChat() {
 
   return (
     <FlexBox direction="Column" style={{ height: 'calc(100vh - 120px)', padding: '1rem', gap: '1rem' }}>
+      <div style={{ marginBottom: '0.25rem' }}>
+        <Link to="/" style={{ color: '#0070f3', textDecoration: 'none', fontSize: '0.875rem' }}>← Dashboard</Link>
+      </div>
       <FlexBox direction="Row" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
         <Title level="H3">AI Reconciliation Assistant</Title>
         <Button design="Transparent" style={{ fontSize: '0.8rem', color: '#888' }}

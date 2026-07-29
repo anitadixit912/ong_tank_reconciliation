@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
+import { Link } from 'react-router-dom';
 import { fetchAuditLog } from '../api.js';
 import StatusBadge from '../components/StatusBadge.jsx';
 
@@ -64,6 +65,9 @@ export default function AuditTrail() {
 
   return (
     <div>
+      <div style={{ marginBottom: '0.75rem' }}>
+        <Link to="/" style={{ color: '#0070f3', textDecoration: 'none', fontSize: '0.875rem' }}>← Dashboard</Link>
+      </div>
       <h1 className="page-title">Audit Trail</h1>
 
       {/* Filters */}

@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
+import { Link } from 'react-router-dom';
 import { fetchTankConfigurations, updateTankConfiguration, fetchPlants } from '../api.js';
 
 // ── PlantPicker: searchable live dropdown from S/4HANA ─────────────────────
@@ -172,6 +173,9 @@ export default function Configuration() {
 
   return (
     <div>
+      <div style={{ marginBottom: '0.75rem' }}>
+        <Link to="/" style={{ color: '#0070f3', textDecoration: 'none', fontSize: '0.875rem' }}>← Dashboard</Link>
+      </div>
       <h1 className="page-title">Tank Configuration</h1>
 
       {error && <div className="error-banner">{error}</div>}

@@ -151,6 +151,9 @@ export default function ApprovalQueue() {
 
   return (
     <div>
+      <div style={{ marginBottom: '0.75rem' }}>
+        <Link to="/" style={{ color: '#0070f3', textDecoration: 'none', fontSize: '0.875rem' }}>← Dashboard</Link>
+      </div>
       <h1 className="page-title">Approval Queue</h1>
 
       {error && <div className="error-banner">Failed to load: {error}</div>}
