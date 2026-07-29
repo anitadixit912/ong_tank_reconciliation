@@ -61,9 +61,13 @@ We built a **fully automated, end-to-end tank stock reconciliation pipeline** on
 ### Three layers working together
 
 **Layer 1 — IS-OIL OGS/650 (the source of truth)**
-All tank data lives here. We built two custom OData services in OGS:
-- `ZTANK_DIP_SRV_SRV` — exposes live tank dip readings from `OIB_TANKDIP`
+All tank data lives here. We built three custom OData services in OGS:
+- `ZTANK_DIP_SRV_SRV` — exposes three entity sets:
+  - `TankDipSet` — live tank dip readings from `OIB_TANKDIP`
+  - `ReasonCodeSet` — movement reason codes from `T157D/T157E`
+  - `NominationSet` — open TSW nominations via `BAPI_TSW_NOM_GETLIST` (for supervisor context during approvals)
 - `ZTANK_PLANT_SRV_SRV` — exposes plant/terminal list for the dashboard
+- `ZTANK_POST_SRV_SRV` — handles goods movement posting via IS-OIL Physical Inventory BAPIs (`BAPI_MATPHYSINV_CREATE` → `COUNT` → `POSTDIFF`)
 
 We also built `Z_TANK_RECON_TRIGGER_RUN` — an ABAP function module that allows OGS itself to trigger reconciliation runs on BTP, enabling full IS-OIL-native scheduling.
 
@@ -148,7 +152,7 @@ Configuring OAuth in SM59 required `OA2C_CONFIG` which redirects to a browser-ba
 Successfully connected SAP BTP to IS-OIL HPM tank data on a Private Cloud system via Cloud Connector — reading real `OIB_TANKDIP` data with correct physical quantities and book stock values verified against source records.
 
 **✅ Custom OData services built from scratch**
-Built `ZTANK_DIP_SRV_SRV` and `ZTANK_PLANT_SRV_SRV` in OGS/650 using SEGW — exposing IS-OIL tank data as OData for the first time in this landscape.
+Built `ZTANK_DIP_SRV_SRV` (with 3 entity sets: TankDipSet, ReasonCodeSet, NominationSet), `ZTANK_PLANT_SRV_SRV`, and `ZTANK_POST_SRV_SRV` in OGS/650 — exposing IS-OIL tank data, reason codes, TSW nominations, and goods movement posting as OData for the first time in this landscape.
 
 **✅ OGS → BTP machine-to-machine integration**
 Implemented `Z_TANK_RECON_TRIGGER_RUN` ABAP function module in OGS/650 that fetches an XSUAA token and calls the BTP CAP endpoint — enabling IS-OIL systems to trigger reconciliation runs directly from ABAP.
