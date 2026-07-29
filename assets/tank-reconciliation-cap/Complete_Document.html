@@ -253,7 +253,6 @@
   <tr><td><code>SOCNR</code></td><td>Tank ID (20-char, zero-padded)</td></tr>
   <tr><td><code>QUAN_SKU</code></td><td>Physical quantity in TO (metric tons) — ATG measurement, already VCF-corrected by IS-OIL</td></tr>
   <tr><td><code>RELSTOCK</code></td><td>Book stock (SAP system records) at time of dip</td></tr>
-  <tr><td><code>RELSTOCK</code></td><td>Book stock (SAP stock at time of dip)</td></tr>
   <tr><td><code>ETMSTM</code></td><td>Timestamp of dip reading</td></tr>
   <tr><td><code>MEINS</code></td><td>Unit of measure (TO)</td></tr>
   <tr><td><code>QUAN_LVC</code></td><td>Line Volume Corrected (different UoM — not used for reconciliation)</td></tr>
@@ -382,7 +381,7 @@ Step 3: BAPI_MATPHYSINV_POSTDIFF
   <li>Delta bar chart showing variance percentage visually</li>
   <li>Notification bell with badge count — unread notifications per run</li>
   <li>Approval panel with reason code dropdown (6 IS-OIL codes) and comment field</li>
-  <li>Material document number with link to S/4HANA for posted tanks</li>
+  <li>Material document number with clickable link to OGS/650 Fiori (MIGO transaction) for posted tanks</li>
   <li>UoM displayed as TO (metric tons) throughout</li>
   <li>Responsive layout using SAP Fiori design language</li>
 </ul>
