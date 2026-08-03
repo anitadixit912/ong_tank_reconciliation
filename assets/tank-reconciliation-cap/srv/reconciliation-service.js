@@ -861,10 +861,20 @@ module.exports = class ReconciliationService extends cds.ApplicationService {
         sources = 'Run ' + latestRun.runDate;
       }
 
+      const todayDate = new Date().toISOString().slice(0, 10);
+      const latestRunDate = latestRun ? latestRun.runDate : null;
+      const isStale = latestRunDate && latestRunDate !== todayDate;
       const systemPrompt =
         'You are a helpful tank stock reconciliation assistant for an oil terminal.\n' +
         'You help operators and supervisors understand daily reconciliation results, variances, and approvals.\n' +
         'Keep answers concise and focused on the data.\n\n' +
+        'Today\'s date is: ' + todayDate + '\n' +
+        'Latest available run date: ' + (latestRunDate || 'none') + '\n' +
+        (isStale
+          ? 'WARNING: The latest run date (' + latestRunDate + ') is NOT today (' + todayDate + '). ' +
+            'You MUST start your response by clearly stating: "Note: I only have data from ' + latestRunDate + ', not today (' + todayDate + '). Please trigger a new run for today to get current results." ' +
+            'Then provide the summary from the available data.\n\n'
+          : '') +
         'Current reconciliation context:\n' + tankSummary;
 
       try {
@@ -1092,6 +1102,11 @@ function _fallbackReply(message, latestRun, tankSummary, tanks) {
   const q = (message || '').toLowerCase();
   if (!latestRun) return 'No reconciliation runs found yet. Trigger a run first.';
 
+  const todayDate = new Date().toISOString().slice(0, 10);
+  const staleWarning = latestRun.runDate !== todayDate
+    ? `**Note: I only have data from ${latestRun.runDate}, not today (${todayDate}). Please trigger a new run for today to get current results.**\n\n`
+    : '';
+
   tanks = tanks || [];
 
   // Check if asking about a specific tank by SOCNR (any length) or by tank name
@@ -1264,7 +1279,7 @@ function _fallbackReply(message, latestRun, tankSummary, tanks) {
     const pendingCount  = tanks.filter(t => t.classification === 'RED' && t.postingStatus === 'PENDING').length;
     const rejectedCount = tanks.filter(t => t.postingStatus === 'REJECTED').length;
     const postedCount   = tanks.filter(t => t.postingStatus === 'POSTED').length;
-    return `**Run Summary — ${latestRun.runDate}:**\n\n` +
+    return staleWarning + `**Run Summary — ${latestRun.runDate}:**\n\n` +
       `- Total tanks: **${latestRun.tankCount || 0}**\n` +
       `- OK: **${latestRun.okCount || 0}**\n` +
       `- FLAG: **${latestRun.flagCount || 0}** (auto-posted)\n` +
@@ -1281,7 +1296,7 @@ function _fallbackReply(message, latestRun, tankSummary, tanks) {
   if (q.includes('trigger') || q.includes('start new'))
     return `Go to the **Dashboard**, select a date, and click **⚡ Trigger Run** to start a reconciliation.`;
 
-  return `**Latest (${latestRun.runDate}):**\n\n${tankSummary}\n\nTry asking:\n` +
+  return staleWarning + `**Latest (${latestRun.runDate}):**\n\n${tankSummary}\n\nTry asking:\n` +
     `- "Recommendation for tank 00000000000000000023"\n` +
     `- "Which tanks need approval?"\n` +
     `- "Give me a summary of today's results"`;

@@ -58,7 +58,7 @@ function AppShell() {
       {/* Main content */}
       <div className="app-main">
         <div className="app-topbar">
-          <span>⛽ Hydrocarbon Tank Stock Reconciliation Cockpit</span>
+          <span>⛽ Hydrocarbon Stock Reconciliation Agent</span>
           <NotificationBell />
         </div>
         <div className="shell-content">

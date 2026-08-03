@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { fetchRuns, fetchPendingApprovals, fetchPlants, triggerRun, retriggerDataCollection } from '../api.js';
 import StatusBadge from '../components/StatusBadge.jsx';
@@ -6,6 +6,88 @@ import KpiTile from '../components/KpiTile.jsx';
 
 function todayIso() {
   return new Date().toISOString().slice(0, 10);
+}
+
+function MultiDateSelect({ dates, selectedDates, onChange }) {
+  const [search, setSearch] = useState('');
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    function handleClick(e) {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+    }
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, []);
+
+  const filtered = dates.filter(d => d.includes(search));
+
+  function toggle(date) {
+    if (selectedDates.includes(date)) {
+      onChange(selectedDates.filter(d => d !== date));
+    } else {
+      onChange([...selectedDates, date]);
+    }
+  }
+
+  function removeTag(date) {
+    onChange(selectedDates.filter(d => d !== date));
+  }
+
+  return (
+    <div ref={ref} style={{ position: 'relative', minWidth: '280px' }}>
+      <div
+        className="input"
+        style={{ display: 'flex', flexWrap: 'wrap', gap: '0.25rem', cursor: 'text', minHeight: '36px', alignItems: 'center', padding: '0.25rem 0.5rem' }}
+        onClick={() => setOpen(true)}
+      >
+        {selectedDates.map(d => (
+          <span key={d} style={{ background: '#0070f3', color: '#fff', borderRadius: '0.25rem', padding: '0.1rem 0.4rem', fontSize: '0.78rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+            {d}
+            <span style={{ cursor: 'pointer', fontWeight: 700 }} onClick={e => { e.stopPropagation(); removeTag(d); }}>×</span>
+          </span>
+        ))}
+        <input
+          style={{ border: 'none', outline: 'none', flex: 1, minWidth: '80px', fontSize: '0.875rem', background: 'transparent' }}
+          placeholder={selectedDates.length === 0 ? 'All dates' : ''}
+          value={search}
+          onChange={e => { setSearch(e.target.value); setOpen(true); }}
+          onFocus={() => setOpen(true)}
+        />
+      </div>
+      {open && (
+        <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: '#fff', border: '1px solid #dee2e6', borderRadius: '0.375rem', zIndex: 100, maxHeight: '200px', overflowY: 'auto', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}>
+          {filtered.length === 0 ? (
+            <div style={{ padding: '0.5rem 0.75rem', fontSize: '0.82rem', color: '#6c757d' }}>No dates found</div>
+          ) : (
+            <>
+              <div
+                onClick={() => { onChange([]); setOpen(false); }}
+                style={{ padding: '0.4rem 0.75rem', fontSize: '0.875rem', cursor: 'pointer', borderBottom: '1px solid #dee2e6', color: '#0070f3', fontWeight: 500 }}
+                onMouseEnter={e => e.currentTarget.style.background = '#f8f9fa'}
+                onMouseLeave={e => e.currentTarget.style.background = '#fff'}
+              >
+                All Dates
+              </div>
+              {filtered.map(d => (
+              <div
+                key={d}
+                onClick={() => toggle(d)}
+                style={{ padding: '0.4rem 0.75rem', fontSize: '0.875rem', cursor: 'pointer', background: selectedDates.includes(d) ? '#e7f1ff' : '#fff', display: 'flex', alignItems: 'center', gap: '0.5rem' }}
+                onMouseEnter={e => e.currentTarget.style.background = selectedDates.includes(d) ? '#d0e4ff' : '#f8f9fa'}
+                onMouseLeave={e => e.currentTarget.style.background = selectedDates.includes(d) ? '#e7f1ff' : '#fff'}
+              >
+                <input type="checkbox" readOnly checked={selectedDates.includes(d)} style={{ cursor: 'pointer' }} />
+                {d}
+              </div>
+            ))}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
 
 export default function Dashboard() {
@@ -23,6 +105,9 @@ export default function Dashboard() {
   const [plants, setPlants]           = useState([]);
   const [plantsLoading, setPlantsLoading] = useState(false);
   const [selectedPlant, setSelectedPlant] = useState('');
+
+  // Multi-date filter state
+  const [selectedDates, setSelectedDates] = useState([]);
 
   const [lastUpdated, setLastUpdated] = useState(null);
 
@@ -61,10 +146,15 @@ export default function Dashboard() {
   const awaitingApproval = runs.filter(r => r.status === 'AWAITING_APPROVAL').length;
   const failedRuns       = runs.filter(r => r.status === 'FAILED').length;
 
+  // Unique sorted run dates for multi-select
+  const availableDates = [...new Set(runs.map(r => r.runDate))].sort((a, b) => b.localeCompare(a));
+
   // Filtered runs for table only
-  const filteredRuns = selectedPlant
-    ? runs.filter(r => r.plant === selectedPlant || !r.plant)
-    : runs;
+  const filteredRuns = runs.filter(r => {
+    const matchesPlant = !selectedPlant || r.plant === selectedPlant || !r.plant;
+    const matchesDate  = selectedDates.length === 0 || selectedDates.includes(r.runDate);
+    return matchesPlant && matchesDate;
+  });
 
   // R11: Re-trigger data collection for a FAILED or PENDING run
   async function handleRetrigger(runId, runDate) {
@@ -169,11 +259,24 @@ export default function Dashboard() {
       {error && <div className="error-banner">Failed to load runs: {error}</div>}
 
       <div className="card">
-        <div className="card-header">
-          Recent Reconciliation Runs
+        <div className="card-header" style={{ display: 'flex', alignItems: 'center', gap: '1rem', flexWrap: 'wrap' }}>
+          <span>Recent Reconciliation Runs</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: 400, fontSize: '0.875rem' }}>
+            <label style={{ color: '#495057', whiteSpace: 'nowrap' }}>Filter by Date:</label>
+            <MultiDateSelect
+              dates={availableDates}
+              selectedDates={selectedDates}
+              onChange={setSelectedDates}
+            />
+            {selectedDates.length > 0 ? (
+              <button className="btn btn-outline" style={{ fontSize: '0.78rem', padding: '0.2rem 0.5rem' }} onClick={() => setSelectedDates([])}>
+                All Dates
+              </button>
+            ) : null}
+          </div>
           {selectedPlant && (
-            <span style={{ fontSize: '0.82rem', fontWeight: 400, marginLeft: '0.5rem', color: '#666' }}>
-              — filtered: {selectedPlant} ({filteredRuns.length} of {runs.length})
+            <span style={{ fontSize: '0.82rem', fontWeight: 400, color: '#666' }}>
+              — plant: {selectedPlant} ({filteredRuns.length} of {runs.length})
             </span>
           )}
         </div>

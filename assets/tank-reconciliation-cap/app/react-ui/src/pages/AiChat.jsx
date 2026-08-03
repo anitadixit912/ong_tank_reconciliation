@@ -23,6 +23,39 @@ const SUGGESTIONS = [
 const INITIAL_MESSAGE = { role: 'assistant', text: 'Hello! I\'m your Tank Reconciliation Assistant. Ask me about variance results, tank status, or pending approvals.' };
 const SESSION_KEY = 'tank_recon_chat_history';
 
+function MarkdownText({ text }) {
+  const lines = (text || '').split('\n');
+  return (
+    <div>
+      {lines.map((line, i) => {
+        // Heading
+        if (line.startsWith('### ')) return <div key={i} style={{ fontWeight: 700, fontSize: '0.95rem', marginTop: '0.5rem' }}>{renderInline(line.slice(4))}</div>;
+        if (line.startsWith('## '))  return <div key={i} style={{ fontWeight: 700, fontSize: '1rem', marginTop: '0.5rem' }}>{renderInline(line.slice(3))}</div>;
+        if (line.startsWith('# '))   return <div key={i} style={{ fontWeight: 700, fontSize: '1.05rem', marginTop: '0.5rem' }}>{renderInline(line.slice(2))}</div>;
+        // Bullet
+        if (line.startsWith('- ') || line.startsWith('* ')) return <div key={i} style={{ paddingLeft: '1rem', display: 'flex', gap: '0.4rem' }}><span>•</span><span>{renderInline(line.slice(2))}</span></div>;
+        if (line.match(/^\s{2,}-\s/)) return <div key={i} style={{ paddingLeft: '2rem', display: 'flex', gap: '0.4rem' }}><span>◦</span><span>{renderInline(line.replace(/^\s+-\s/, ''))}</span></div>;
+        // Numbered list
+        if (line.match(/^\d+\.\s/)) return <div key={i} style={{ paddingLeft: '1rem' }}>{renderInline(line)}</div>;
+        // Empty line
+        if (line.trim() === '') return <div key={i} style={{ height: '0.4rem' }} />;
+        // Normal
+        return <div key={i}>{renderInline(line)}</div>;
+      })}
+    </div>
+  );
+}
+
+function renderInline(text) {
+  const parts = text.split(/(\*\*[^*]+\*\*|\*[^*]+\*|`[^`]+`)/g);
+  return parts.map((part, i) => {
+    if (part.startsWith('**') && part.endsWith('**')) return <strong key={i}>{part.slice(2, -2)}</strong>;
+    if (part.startsWith('*') && part.endsWith('*'))   return <em key={i}>{part.slice(1, -1)}</em>;
+    if (part.startsWith('`') && part.endsWith('`'))   return <code key={i} style={{ background: 'rgba(0,0,0,0.08)', borderRadius: '3px', padding: '0 3px', fontSize: '0.85em' }}>{part.slice(1, -1)}</code>;
+    return part;
+  });
+}
+
 export default function AiChat() {
   const [messages, setMessages] = useState(() => {
     try {
@@ -120,7 +153,7 @@ export default function AiChat() {
                 fontSize: '0.875rem',
                 lineHeight: '1.5'
               }}>
-                {msg.text}
+                {msg.role === 'assistant' ? <MarkdownText text={msg.text} /> : msg.text}
                 {msg.sources && (
                   <div style={{ marginTop: '0.4rem', fontSize: '0.75rem', opacity: 0.6 }}>
                     Source: {msg.sources}
