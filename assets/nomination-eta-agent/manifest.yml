@@ -1,0 +1,25 @@
+---
+# CF manifest for Nomination ETA Proposal Agent
+# Deploy from assets/nomination-eta-agent/ via: cf push
+applications:
+  - name: nomination-eta-agent
+    memory: 512M
+    disk_quota: 1G
+    instances: 1
+    buildpacks:
+      - python_buildpack
+    command: gunicorn --worker-class uvicorn.workers.UvicornWorker --workers 2 --bind 0.0.0.0:${PORT} --chdir app main:application
+    timeout: 180
+    health-check-type: http
+    health-check-http-endpoint: /.well-known/agent.json
+    services:
+      - proj-vector-destination-service
+    env:
+      AICORE_DESTINATION_NAME: aicore
+      CAP_BASE_URL: https://tank-reconciliation-cap-srv-patient-leopard-kw.cfapps.us10.hana.ondemand.com
+      LOG_LEVEL: INFO
+      AGENT_LLM_MODEL: gpt-4o
+      # MST_API_KEY and MST_SECRET_KEY: set via:
+      #   cf set-env nomination-eta-agent MST_API_KEY <your-key>
+      #   cf set-env nomination-eta-agent MST_SECRET_KEY <your-secret>
+      # Get keys from: https://www.myshiptracking.com (Account → API Access)
