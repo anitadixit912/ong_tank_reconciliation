@@ -179,6 +179,170 @@ npm run dev
 
 ---
 
+## n8n Workflow — New Joiner Guide
+
+> If you are new to this project, read this section before looking at any code.
+
+---
+
+### What is n8n?
+
+n8n is an **open-source workflow automation platform** — a visual pipeline builder where each node does one thing (call an API, run JavaScript, check a condition, wait for a callback). It runs on SAP BTP alongside the CAP application.
+
+In this solution:
+
+| Component | Role |
+|-----------|------|
+| **CAP application** | The brain — stores runs, variances, approvals, audit trail; serves the React dashboard |
+| **n8n workflow** | The engine — orchestrates every automated step from data ingestion to goods movement posting |
+| **AppRouter (jackal)** | The front door — the URL you open in a browser; serves the React UI |
+
+---
+
+### Workflow Pipeline — Visual Overview
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         TRIGGER (daily 06:00 or on-demand)              │
+│              ⏰ Daily Scheduler  ──┐                                     │
+│              🔗 Webhook Trigger  ──┴──→  Normalize Input                │
+└─────────────────────────────────────────────────────────────────────────┘
+                                        │
+                                        ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│  M1  DATA INGESTION                                                      │
+│                                                                          │
+│   📡 ATG Ingest          📋 Fetch Tank Config                            │
+│   (IS-OIL OData)         (CAP TankConfiguration)                        │
+│         └──────────────────────┘                                        │
+│                       │                                                  │
+│              Merge & Validate Data                                       │
+│                       │                                                  │
+│              Completeness Check ──── ❌ Missing readings?               │
+│                       │                      └──→ Halt + URGENT Alert   │
+│                       ✅ All tanks present                               │
+└─────────────────────────────────────────────────────────────────────────┘
+                                        │
+                                        ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│  M2  VCF CORRECTION  (Gross → Net Volume)                               │
+│                                                                          │
+│   📐 Read Measurement Docs (strapping data)                             │
+│                       │                                                  │
+│   🌡️  Call VCF Conversion API ──── ❌ API down?                         │
+│                       │                  └──→ ASTM D1250 Fallback       │
+│                       ✅ Net volumes calculated                          │
+└─────────────────────────────────────────────────────────────────────────┘
+                                        │
+                                        ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│  M3  VARIANCE ENGINE                                                     │
+│                                                                          │
+│   delta  =  Physical Stock  −  Book Stock                               │
+│   delta% =  delta / Book Stock × 100                                    │
+│                                                                          │
+│   Classification:                                                        │
+│   🟢 GREEN   delta% ≤ 0.5%    → auto-post (no human action needed)     │
+│   🟡 AMBER   delta% 0.5–2%   → auto-post + supervisor notified         │
+│   🔴 RED     delta% > 2%     → HELD — supervisor must approve          │
+└─────────────────────────────────────────────────────────────────────────┘
+                                        │
+                         ┌──────────────┴──────────────┐
+                    🟢🟡 OK / AMBER                   🔴 RED tanks exist
+                         │                             │
+                         │                             ▼
+                         │            ┌────────────────────────────────────┐
+                         │            │  M4  APPROVAL GATE                 │
+                         │            │                                    │
+                         │            │  🔔 URGENT Alert → Supervisor      │
+                         │            │  📋 Run status → AWAITING APPROVAL │
+                         │            │                                    │
+                         │            │  ⏸️  WORKFLOW PAUSES HERE          │
+                         │            │  (Webhook Wait node — frozen       │
+                         │            │   until supervisor acts)           │
+                         │            │                                    │
+                         │            │  Supervisor opens CAP dashboard    │
+                         │            │  → Approval Queue → Approve/Reject │
+                         │            │                                    │
+                         │            │  CAP calls back to n8n webhook     │
+                         │            │  ▶️  WORKFLOW RESUMES              │
+                         │            └────────────────────────────────────┘
+                         │                             │
+                         └──────────────┬──────────────┘
+                                        │
+                                        ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│  M5  GOODS MOVEMENT POSTING                                              │
+│                                                                          │
+│   🏭 Build Material Document payload                                    │
+│   📤 POST → ZTANK_POST_SRV_SRV (S/4HANA)                               │
+│   📄 Material Doc number stored in CAP audit log                        │
+│                                                                          │
+│   ❌ Posting fails? → Log failure + URGENT Alert (no auto-retry)        │
+└─────────────────────────────────────────────────────────────────────────┘
+                                        │
+                                        ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│  M6  ALERTS & REPORT DISTRIBUTION                                        │
+│                                                                          │
+│   🔔 BTP Alert Notification Service  → Finance + Supervisor             │
+│   📧 Email report                    → Configured recipients            │
+│   💬 MS Teams webhook                → Operations channel               │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+### The Approval Pause — Key Concept for New Joiners
+
+The **Webhook Wait node** (step M4) is the most important concept to understand.
+
+```
+n8n detects RED tank
+        │
+        ├──→ Fires URGENT alert to supervisor
+        ├──→ Sets CAP run status = AWAITING_APPROVAL
+        └──→ ⏸️  SUSPENDS — workflow is frozen, waiting
+
+                    [ Supervisor opens CAP dashboard ]
+                    [ Approval Queue → clicks Approve ]
+
+                              CAP sends POST to:
+               /webhook/tank-reconciliation/approval-callback
+
+        ▶️  n8n WAKES UP and continues to M5 posting
+```
+
+There is **no polling**. The workflow freezes mid-execution and only resumes when the supervisor's browser action triggers the callback. This is how human oversight is enforced without any manual steps in n8n itself.
+
+---
+
+### AppRouter vs n8n — Common Confusion
+
+| | AppRouter (jackal) | n8n |
+|---|---|---|
+| **What it is** | Front-facing web server | Background pipeline engine |
+| **URL** | `https://tank-reconciliation-approuter-proud-jackal-qo.cfapps.us10.hana.ondemand.com` | No public URL — internal to BTP |
+| **Who uses it** | Every user — open in a browser | No one opens it directly |
+| **What it does** | Serves the React dashboard | Runs the daily reconciliation pipeline |
+
+> When testing, open the **AppRouter (jackal) URL**. n8n runs silently — you see its output in the dashboard run status and audit trail.
+
+---
+
+### Workflow File Location
+
+```
+assets/
+└── n8n/
+    └── workflows/
+        └── tank-reconciliation-agent.n8n.json   ← 48-node workflow definition
+```
+
+Import this file into any n8n instance to view or edit the workflow visually.
+
+---
+
 ## Solution Narrative
 
 See [SOLUTION_NARRATIVE.md](assets/tank-reconciliation-cap/SOLUTION_NARRATIVE.md) for the full business problem, solution overview, challenges, and achievements.
