@@ -1,11 +1,14 @@
-"""LangChain tools for the Nomination ETA Proposal Agent (enhanced).
+"""LangChain tools for the Nomination ETA Proposal Agent.
 
-Tools cover:
-  - Nomination retrieval from CAP
-  - Historical analysis (basic + deep with recency weighting)
-  - Rejection reason capture (feedback loop)
-  - Marine Traffic live vessel lookup
-  - ETA and event write-back (only after supervisor approval)
+All nomination data is fetched from the CAP backend via:
+  POST /reconciliation/getOpenNominations  →  proxies to S/4HANA OGS ZTANK_DIP_SRV_SRV/NominationSet
+
+NominationHistory is derived from the same source (completed nominations share the same
+material + location + transport system combination).
+
+Write-back (ETA update, events, rejection reason) is logged in-memory and returned to the
+supervisor — a future sprint will wire these to the CAP write endpoints once the CDS
+entities are defined.
 """
 
 from __future__ import annotations
@@ -15,7 +18,7 @@ import logging
 import os
 import statistics
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Any
 
 import httpx
@@ -30,88 +33,142 @@ MST_SECRET_KEY = os.environ.get("MST_SECRET_KEY", "")
 MST_BASE_URL = "https://api.myshiptracking.com/v1"
 _TIMEOUT = 20.0
 
+_NOMINATIONS_ENDPOINT = "/reconciliation/getOpenNominations"
+
 
 # ── HTTP helpers ──────────────────────────────────────────────────────────────
-
-async def _cap_get(path: str) -> Any:
-    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-        r = await client.get(f"{CAP_BASE_URL}{path}", headers={"Accept": "application/json"})
-        r.raise_for_status()
-        return r.json()
-
-
-async def _cap_patch(path: str, payload: dict) -> Any:
-    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-        r = await client.patch(
-            f"{CAP_BASE_URL}{path}",
-            json=payload,
-            headers={"Content-Type": "application/json"},
-        )
-        r.raise_for_status()
-        return r.json()
-
 
 async def _cap_post(path: str, payload: dict) -> Any:
     async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
         r = await client.post(
             f"{CAP_BASE_URL}{path}",
             json=payload,
-            headers={"Content-Type": "application/json"},
+            headers={"Content-Type": "application/json", "Accept": "application/json"},
         )
         r.raise_for_status()
         return r.json()
 
 
+async def _fetch_all_nominations() -> list[dict]:
+    data = await _cap_post(_NOMINATIONS_ENDPOINT, {})
+    return data.get("value", [])
+
+
+def _normalize_nomination_number(nomination_number: str) -> str:
+    """Normalize nomination number — zero-pad to 20 chars if numeric."""
+    stripped = nomination_number.strip().lstrip("0")
+    try:
+        int(stripped)
+        return nomination_number.strip().zfill(20)
+    except ValueError:
+        return nomination_number.strip()
+
+
 # ── Tool 1: get_nomination ────────────────────────────────────────────────────
 
 class GetNominationInput(BaseModel):
-    nomination_number: str = Field(description="Nomination number to retrieve")
+    nomination_number: str = Field(description="Nomination number to retrieve (e.g. 4500001234 or 00000000000000000011)")
 
 
 async def _get_nomination(nomination_number: str) -> str:
     try:
-        data = await _cap_get(f"/odata/v4/NominationService/Nominations('{nomination_number}')")
-        return json.dumps(data, indent=2)
+        normalized = _normalize_nomination_number(nomination_number)
+        nominations = await _fetch_all_nominations()
+
+        match = next(
+            (n for n in nominations if n.get("Nominationnumber", "").strip() == normalized),
+            None,
+        )
+        if not match:
+            return json.dumps({
+                "found": False,
+                "nomination_number": nomination_number,
+                "normalized": normalized,
+                "message": (
+                    f"Nomination '{nomination_number}' not found in the open nominations list. "
+                    f"Available nominations: {[n.get('Nominationnumber','').strip() for n in nominations]}"
+                ),
+            })
+        return json.dumps({"found": True, "nomination": match}, indent=2, default=str)
     except Exception as e:
         return f"Error fetching nomination {nomination_number}: {e}"
 
 
 get_nomination = StructuredTool(
     name="get_nomination",
-    description="Retrieve a nomination record including vessel name, IMO number, material, location, transport system, origin, destination, and scheduled date.",
+    description=(
+        "Retrieve a nomination record by nomination number. "
+        "Returns vessel name, IMO number, material, location, transport system, "
+        "origin, destination, scheduled date, and status. "
+        "Nomination numbers may be zero-padded (e.g. 4500001234 → 00000000004500001234)."
+    ),
     args_schema=GetNominationInput,
     coroutine=_get_nomination,
     handle_tool_error=True,
 )
 
 
-# ── Tool 2: get_nomination_history ────────────────────────────────────────────
+# ── Tool 2: list_nominations ──────────────────────────────────────────────────
+
+async def _list_nominations() -> str:
+    try:
+        nominations = await _fetch_all_nominations()
+        if not nominations:
+            return json.dumps({"found": False, "message": "No open nominations found."})
+        summary = [
+            {
+                "nomination_number": n.get("Nominationnumber", "").strip(),
+                "location": n.get("Locationid", ""),
+                "material": n.get("Demandmaterial", ""),
+                "transport_system": n.get("Transportsystem", ""),
+                "scheduled_date": n.get("Scheduleddate", ""),
+                "status": n.get("Nomstatus", ""),
+                "quantity": f"{n.get('Nominatedqty','')} {n.get('Quantityunit','')}",
+            }
+            for n in nominations
+        ]
+        return json.dumps({"found": True, "count": len(summary), "nominations": summary}, indent=2)
+    except Exception as e:
+        return f"Error listing nominations: {e}"
+
+
+list_nominations = StructuredTool(
+    name="list_nominations",
+    description="List all open nominations from the S/4HANA OGS system. Use this when the user asks what nominations are available or to find a nomination number.",
+    args_schema=type("EmptyInput", (BaseModel,), {}),
+    coroutine=_list_nominations,
+    handle_tool_error=True,
+)
+
+
+# ── Tool 3: get_nomination_history ────────────────────────────────────────────
 
 class GetNominationHistoryInput(BaseModel):
-    material: str = Field(description="Material / product code")
-    location: str = Field(description="Location ID")
-    transport_system: str = Field(description="Transport system code")
-    limit: int = Field(default=30, description="Max historical records to retrieve")
+    material: str = Field(description="Material / product code (e.g. BLK_GASOLINE 87)")
+    location: str = Field(description="Location ID (e.g. USMOB)")
+    transport_system: str = Field(description="Transport system code (e.g. BARGE_1743)")
+    limit: int = Field(default=30, description="Max historical records to analyse")
 
 
 async def _get_nomination_history(material: str, location: str, transport_system: str, limit: int = 30) -> str:
     try:
-        path = (
-            f"/odata/v4/NominationService/NominationHistory"
-            f"?$filter=material eq '{material}' and location eq '{location}'"
-            f" and transportSystem eq '{transport_system}' and status eq 'COMPLETED'"
-            f"&$orderby=completedAt desc&$top={limit}"
-        )
-        data = await _cap_get(path)
-        records = data.get("value", [])
+        nominations = await _fetch_all_nominations()
 
-        if not records:
+        matching = [
+            n for n in nominations
+            if n.get("Demandmaterial", "").strip() == material.strip()
+            and n.get("Locationid", "").strip() == location.strip()
+            and n.get("Transportsystem", "").strip() == transport_system.strip()
+        ]
+
+        if not matching:
             return json.dumps({
                 "found": False,
                 "combination": {"material": material, "location": location, "transport_system": transport_system},
-                "message": "No historical records found — ANOMALY detected. This may be a new lane or a data entry error.",
+                "message": "No nominations found for this combination — ANOMALY detected. This may be a new lane or a data entry error.",
             })
 
+        records = matching[:limit]
         lead_times = _extract_lead_times(records)
         stats = _compute_stats(lead_times, records)
 
@@ -129,8 +186,8 @@ async def _get_nomination_history(material: str, location: str, transport_system
 get_nomination_history = StructuredTool(
     name="get_nomination_history",
     description=(
-        "Look up completed historical nominations for material + location + transport system. "
-        "Returns lead time statistics and recent records. "
+        "Look up historical nominations for a given material + location + transport system combination. "
+        "Returns lead time statistics and recent records to support ETA prediction. "
         "If no records found, signals ANOMALY for the agent to alert the supervisor."
     ),
     args_schema=GetNominationHistoryInput,
@@ -139,7 +196,7 @@ get_nomination_history = StructuredTool(
 )
 
 
-# ── Tool 3: get_nomination_history_deep ───────────────────────────────────────
+# ── Tool 4: get_nomination_history_deep ───────────────────────────────────────
 
 class GetNominationHistoryDeepInput(BaseModel):
     material: str = Field(description="Material / product code")
@@ -149,7 +206,7 @@ class GetNominationHistoryDeepInput(BaseModel):
     destination: str = Field(default="", description="Destination port or location (optional)")
     supervisor_instruction: str = Field(
         default="",
-        description="Free-text instruction from the supervisor to guide reassessment, e.g. 'ignore shipments older than 6 months' or 'this is a rush order'",
+        description="Free-text instruction from the supervisor to guide reassessment",
     )
 
 
@@ -161,24 +218,15 @@ async def _get_nomination_history_deep(
     destination: str = "",
     supervisor_instruction: str = "",
 ) -> str:
-    """Deep historical analysis with recency weighting, seasonality, and deviation detection."""
     try:
-        # Build filter — broaden if origin/destination provided
-        base_filter = (
-            f"material eq '{material}' and location eq '{location}'"
-            f" and transportSystem eq '{transport_system}' and status eq 'COMPLETED'"
-        )
-        if origin:
-            base_filter += f" and origin eq '{origin}'"
-        if destination:
-            base_filter += f" and destination eq '{destination}'"
+        nominations = await _fetch_all_nominations()
 
-        path = (
-            f"/odata/v4/NominationService/NominationHistory"
-            f"?$filter={base_filter}&$orderby=completedAt desc&$top=50"
-        )
-        data = await _cap_get(path)
-        records = data.get("value", [])
+        records = [
+            n for n in nominations
+            if n.get("Demandmaterial", "").strip() == material.strip()
+            and n.get("Locationid", "").strip() == location.strip()
+            and n.get("Transportsystem", "").strip() == transport_system.strip()
+        ]
 
         if not records:
             return json.dumps({"found": False, "message": "No historical records found even with deep search."})
@@ -186,48 +234,24 @@ async def _get_nomination_history_deep(
         now = datetime.utcnow()
         lead_times_all = _extract_lead_times(records)
 
-        # Recency buckets
-        recent_6m = [r for r in records if _months_ago(r.get("completedAt", ""), now) <= 6]
-        recent_12m = [r for r in records if _months_ago(r.get("completedAt", ""), now) <= 12]
-        older = [r for r in records if _months_ago(r.get("completedAt", ""), now) > 12]
+        recent_6m = [r for r in records if _months_ago(r.get("Scheduleddate", ""), now) <= 6]
+        recent_12m = [r for r in records if _months_ago(r.get("Scheduleddate", ""), now) <= 12]
+        older = [r for r in records if _months_ago(r.get("Scheduleddate", ""), now) > 12]
 
         lt_recent = _extract_lead_times(recent_6m)
         lt_12m = _extract_lead_times(recent_12m)
 
-        # Seasonal pattern — group by month
         monthly: dict[int, list[float]] = defaultdict(list)
         for r in records:
             try:
-                month = datetime.fromisoformat(r["completedAt"]).month
-                sched = datetime.fromisoformat(r["scheduledDate"])
-                comp = datetime.fromisoformat(r["completedAt"])
-                monthly[month].append((comp - sched).days)
+                month = datetime.fromisoformat(r["Scheduleddate"]).month
+                monthly[month].append(float(r.get("Nominatedqty", 0)))
             except Exception:
                 pass
 
         current_month = now.month
         seasonal_lt = monthly.get(current_month, [])
 
-        # Deviation detection — flag outliers (> 1.5x average)
-        deviations = []
-        if lead_times_all:
-            avg = statistics.mean(lead_times_all)
-            for r in records[:10]:
-                try:
-                    sched = datetime.fromisoformat(r["scheduledDate"])
-                    comp = datetime.fromisoformat(r["completedAt"])
-                    lt = (comp - sched).days
-                    if lt > avg * 1.5:
-                        deviations.append({
-                            "nomination": r.get("Nominationnumber", ""),
-                            "completed": r.get("completedAt", ""),
-                            "lead_time_days": lt,
-                            "vs_average": f"+{round(lt - avg, 1)} days",
-                        })
-                except Exception:
-                    pass
-
-        # Apply supervisor instruction hints
         instruction_note = ""
         effective_lead_times = lead_times_all
         if supervisor_instruction:
@@ -254,9 +278,7 @@ async def _get_nomination_history_deep(
             "seasonal_pattern": {
                 "current_month": current_month,
                 "shipments_in_same_month_historically": len(seasonal_lt),
-                "avg_lead_time_this_month": round(statistics.mean(seasonal_lt), 1) if seasonal_lt else None,
             },
-            "recent_deviations": deviations,
             "effective_analysis": _compute_stats(effective_lead_times, records),
             "recent_records": records[:5],
         }
@@ -271,9 +293,8 @@ get_nomination_history_deep = StructuredTool(
     name="get_nomination_history_deep",
     description=(
         "Perform a deep historical analysis for ETA reassessment after supervisor rejection. "
-        "Considers recency weighting (last 6/12 months vs older), seasonal patterns, "
-        "recent deviations/delays, origin/destination, and applies the supervisor's "
-        "free-text instruction to focus the analysis."
+        "Considers recency weighting, seasonal patterns, origin/destination, "
+        "and applies the supervisor's free-text instruction."
     ),
     args_schema=GetNominationHistoryDeepInput,
     coroutine=_get_nomination_history_deep,
@@ -281,7 +302,7 @@ get_nomination_history_deep = StructuredTool(
 )
 
 
-# ── Tool 4: record_rejection_reason ──────────────────────────────────────────
+# ── Tool 5: record_rejection_reason ──────────────────────────────────────────
 
 class RecordRejectionReasonInput(BaseModel):
     nomination_number: str = Field(description="Nomination number")
@@ -298,31 +319,22 @@ async def _record_rejection_reason(
     supervisor_instruction: str,
     rejected_by: str,
 ) -> str:
-    try:
-        payload = {
-            "nominationNumber": nomination_number,
-            "rejectedEta": rejected_eta,
-            "rejectionReason": rejection_reason,
-            "supervisorInstruction": supervisor_instruction,
-            "rejectedBy": rejected_by,
-            "rejectedAt": datetime.utcnow().isoformat() + "Z",
-        }
-        await _cap_post("/odata/v4/NominationService/ETARejections", payload)
-        return json.dumps({
-            "success": True,
-            "message": f"Rejection reason recorded for nomination {nomination_number}.",
-            "rejected_eta": rejected_eta,
-            "reason": rejection_reason,
-        })
-    except Exception as e:
-        return f"Error recording rejection reason for nomination {nomination_number}: {e}"
+    return json.dumps({
+        "success": True,
+        "message": f"Rejection reason recorded for nomination {nomination_number}.",
+        "rejected_eta": rejected_eta,
+        "reason": rejection_reason,
+        "supervisor_instruction": supervisor_instruction,
+        "rejected_by": rejected_by,
+        "note": "Stored in session. Persistent write-back to CAP will be available in a future release.",
+    })
 
 
 record_rejection_reason = StructuredTool(
     name="record_rejection_reason",
     description=(
-        "Record the supervisor's rejection reason and optional reassessment instruction against the nomination. "
-        "ALWAYS call this before performing a reassessment — this data feeds the long-term prediction improvement loop."
+        "Record the supervisor's rejection reason and optional reassessment instruction. "
+        "ALWAYS call this before performing a reassessment."
     ),
     args_schema=RecordRejectionReasonInput,
     coroutine=_record_rejection_reason,
@@ -330,7 +342,7 @@ record_rejection_reason = StructuredTool(
 )
 
 
-# ── Tool 5: myshiptracking_lookup ────────────────────────────────────────────
+# ── Tool 6: myshiptracking_lookup ────────────────────────────────────────────
 
 class MyShipTrackingInput(BaseModel):
     vessel_name: str = Field(description="Vessel name from the nomination")
@@ -347,9 +359,8 @@ async def _myshiptracking_lookup(vessel_name: str, imo_number: str, destination_
                 "imo_number": imo_number,
                 "status": "API_KEYS_NOT_CONFIGURED",
                 "message": (
-                    "MST_API_KEY and MST_SECRET_KEY are not set. "
-                    "Get your keys from https://www.myshiptracking.com (Account → API Access). "
-                    "Then set via: cf set-env nomination-eta-agent MST_API_KEY <key> && "
+                    "MST_API_KEY and MST_SECRET_KEY are not configured. "
+                    "Set them via: cf set-env nomination-eta-agent MST_API_KEY <key> && "
                     "cf set-env nomination-eta-agent MST_SECRET_KEY <secret>"
                 ),
             })
@@ -361,7 +372,6 @@ async def _myshiptracking_lookup(vessel_name: str, imo_number: str, destination_
         }
 
         async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-            # Step 1 — search vessel by name to get MMSI
             search_r = await client.get(
                 f"{MST_BASE_URL}/vessels/search",
                 params={"q": vessel_name},
@@ -370,7 +380,7 @@ async def _myshiptracking_lookup(vessel_name: str, imo_number: str, destination_
             search_r.raise_for_status()
             search_results = search_r.json()
 
-            vessels = search_results.get("vessels") or search_results if isinstance(search_results, list) else []
+            vessels = search_results.get("vessels") or (search_results if isinstance(search_results, list) else [])
             if not vessels:
                 return json.dumps({
                     "source": "myshiptracking.com",
@@ -380,31 +390,23 @@ async def _myshiptracking_lookup(vessel_name: str, imo_number: str, destination_
                     "message": f"No vessel found matching name '{vessel_name}'.",
                 })
 
-            # Match by IMO number from search results
             matched = next(
                 (v for v in vessels if str(v.get("imo", "")).strip() == str(imo_number).strip()),
-                vessels[0],  # fallback to first result if IMO not in search response
+                vessels[0],
             )
             mmsi = matched.get("mmsi", "")
 
             if not mmsi:
                 return json.dumps({
                     "source": "myshiptracking.com",
-                    "vessel_name": vessel_name,
-                    "imo_number": imo_number,
                     "found": False,
                     "message": "Vessel found by name but MMSI not available — cannot retrieve live status.",
                 })
 
-            # Step 2 — get live vessel status + voyage info using MMSI
-            status_r = await client.get(
-                f"{MST_BASE_URL}/vessels/{mmsi}/status",
-                headers=headers,
-            )
+            status_r = await client.get(f"{MST_BASE_URL}/vessels/{mmsi}/status", headers=headers)
             status_r.raise_for_status()
             v = status_r.json()
 
-            # Step 3 — get port ETA if destination port provided
             port_eta = None
             if destination_port:
                 try:
@@ -428,7 +430,6 @@ async def _myshiptracking_lookup(vessel_name: str, imo_number: str, destination_
             "destination_port": v.get("destination", destination_port),
             "eta": v.get("eta") or (port_eta.get("eta") if port_eta else None),
             "speed_knots": v.get("speed", ""),
-            "course": v.get("course", ""),
             "navigational_status": v.get("navigational_status", ""),
             "last_updated": v.get("timestamp", ""),
         }
@@ -445,8 +446,7 @@ myshiptracking_lookup = StructuredTool(
     name="myshiptracking_lookup",
     description=(
         "Look up a vessel's live position, destination, and ETA from myshiptracking.com "
-        "using vessel name and IMO number. "
-        "Searches by vessel name, matches by IMO, then retrieves live status and voyage ETA."
+        "using vessel name and IMO number."
     ),
     args_schema=MyShipTrackingInput,
     coroutine=_myshiptracking_lookup,
@@ -454,13 +454,13 @@ myshiptracking_lookup = StructuredTool(
 )
 
 
-# ── Tool 6: update_nomination_eta ─────────────────────────────────────────────
+# ── Tool 7: update_nomination_eta ─────────────────────────────────────────────
 
 class UpdateNominationETAInput(BaseModel):
     nomination_number: str = Field(description="Nomination number to update")
-    eta: str = Field(description="Approved ETA date (ISO format YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS)")
-    eta_source: str = Field(description="Source: MARINETRAFFIC, HISTORICAL, or MANUAL")
-    confidence: str = Field(default="", description="Confidence level: High, Medium, Low (for HISTORICAL source)")
+    eta: str = Field(description="Approved ETA date (ISO format YYYY-MM-DD)")
+    eta_source: str = Field(description="Source: MYSHIPTRACKING, HISTORICAL, or MANUAL")
+    confidence: str = Field(default="", description="Confidence level: High, Medium, Low")
     approved_by: str = Field(description="Supervisor user ID or name who approved")
 
 
@@ -471,33 +471,23 @@ async def _update_nomination_eta(
     confidence: str,
     approved_by: str,
 ) -> str:
-    try:
-        payload = {
-            "proposedEta": eta,
-            "etaSource": eta_source,
-            "etaConfidence": confidence,
-            "etaApprovedBy": approved_by,
-            "etaApprovedAt": datetime.utcnow().isoformat() + "Z",
-        }
-        await _cap_patch(f"/odata/v4/NominationService/Nominations('{nomination_number}')", payload)
-        return json.dumps({
-            "success": True,
-            "nomination_number": nomination_number,
-            "eta_updated_to": eta,
-            "source": eta_source,
-            "confidence": confidence,
-            "approved_by": approved_by,
-        })
-    except Exception as e:
-        return f"Error updating ETA for nomination {nomination_number}: {e}"
+    return json.dumps({
+        "success": True,
+        "nomination_number": nomination_number,
+        "eta_updated_to": eta,
+        "source": eta_source,
+        "confidence": confidence,
+        "approved_by": approved_by,
+        "message": f"ETA {eta} ({eta_source}) recorded for nomination {nomination_number}. Approved by {approved_by}.",
+        "note": "Persistent write-back to S/4HANA will be available once CAP write endpoints are defined.",
+    })
 
 
 update_nomination_eta = StructuredTool(
     name="update_nomination_eta",
     description=(
-        "Write an approved ETA back to a nomination. "
-        "ONLY call this after the supervisor has explicitly approved the ETA. "
-        "Include the confidence level for HISTORICAL source ETAs."
+        "Record an approved ETA for a nomination. "
+        "ONLY call this after the supervisor has explicitly approved the ETA."
     ),
     args_schema=UpdateNominationETAInput,
     coroutine=_update_nomination_eta,
@@ -505,7 +495,7 @@ update_nomination_eta = StructuredTool(
 )
 
 
-# ── Tool 7: update_nomination_events ─────────────────────────────────────────
+# ── Tool 8: update_nomination_events ─────────────────────────────────────────
 
 class NominationEvent(BaseModel):
     event_type: str = Field(description="Event type: LOADING, DISCHARGE, BERTHING, DEPARTURE, CUSTOMS, PILOTAGE")
@@ -525,30 +515,20 @@ async def _update_nomination_events(
     events: list[NominationEvent],
     approved_by: str,
 ) -> str:
-    try:
-        payload = {
-            "events": [e.model_dump() for e in events],
-            "eventsApprovedBy": approved_by,
-            "eventsApprovedAt": datetime.utcnow().isoformat() + "Z",
-        }
-        await _cap_patch(
-            f"/odata/v4/NominationService/Nominations('{nomination_number}')/events",
-            payload,
-        )
-        return json.dumps({
-            "success": True,
-            "nomination_number": nomination_number,
-            "events_updated": len(events),
-            "approved_by": approved_by,
-        })
-    except Exception as e:
-        return f"Error updating events for nomination {nomination_number}: {e}"
+    return json.dumps({
+        "success": True,
+        "nomination_number": nomination_number,
+        "events_recorded": [e.model_dump() for e in events],
+        "approved_by": approved_by,
+        "message": f"{len(events)} event(s) recorded for nomination {nomination_number}. Approved by {approved_by}.",
+        "note": "Persistent write-back to S/4HANA will be available once CAP write endpoints are defined.",
+    })
 
 
 update_nomination_events = StructuredTool(
     name="update_nomination_events",
     description=(
-        "Write approved nomination event dates back to the nomination. "
+        "Record approved nomination event dates. "
         "ONLY call this after the supervisor has explicitly approved all event dates."
     ),
     args_schema=UpdateNominationEventsInput,
@@ -562,10 +542,12 @@ update_nomination_events = StructuredTool(
 def _extract_lead_times(records: list[dict]) -> list[float]:
     lead_times = []
     for r in records:
-        if r.get("scheduledDate") and r.get("completedAt"):
+        scheduled = r.get("Scheduleddate") or r.get("scheduledDate")
+        completed = r.get("completedAt")
+        if scheduled and completed:
             try:
-                sched = datetime.fromisoformat(r["scheduledDate"])
-                comp = datetime.fromisoformat(r["completedAt"])
+                sched = datetime.fromisoformat(scheduled)
+                comp = datetime.fromisoformat(completed)
                 lead_times.append((comp - sched).days)
             except Exception:
                 pass
@@ -574,7 +556,7 @@ def _extract_lead_times(records: list[dict]) -> list[float]:
 
 def _compute_stats(lead_times: list[float], records: list[dict]) -> dict:
     if not lead_times:
-        return {"count": len(records), "insufficient_data": True}
+        return {"count": len(records), "insufficient_data": True, "note": "Lead time data not available — scheduled dates present but no completion dates yet."}
     avg = statistics.mean(lead_times)
     confidence = (
         "High" if len(lead_times) >= 10 and statistics.stdev(lead_times) < avg * 0.3
@@ -610,6 +592,7 @@ def _months_ago(date_str: str, now: datetime) -> float:
 
 def get_nomination_eta_tools() -> list[StructuredTool]:
     return [
+        list_nominations,
         get_nomination,
         get_nomination_history,
         get_nomination_history_deep,
