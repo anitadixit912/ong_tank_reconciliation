@@ -53,14 +53,14 @@ async function callNominationEtaAgent(userText, contextId) {
   const payload = {
     jsonrpc: '2.0',
     id: crypto.randomUUID(),
-    method: 'tasks/send',
+    method: 'message/send',
     params: {
-      id: crypto.randomUUID(),
       message: {
         role: 'user',
-        parts: [{ type: 'text', text: userText }],
+        messageId: crypto.randomUUID(),
+        parts: [{ kind: 'text', text: userText }],
+        ...(contextId ? { contextId } : {}),
       },
-      ...(contextId ? { contextId } : {}),
     },
   };
 
@@ -73,17 +73,27 @@ async function callNominationEtaAgent(userText, contextId) {
   if (!res.ok) throw new Error(`Agent error: ${res.status}`);
   const data = await res.json();
 
+  if (data?.error) throw new Error(data.error.message || 'Agent error');
+
   const result = data?.result;
   const newContextId = result?.contextId || contextId;
 
-  // Extract reply text from artifact or status message
+  // Extract reply: artifacts first, then status message, then history
   const artifact = result?.artifacts?.[0];
   if (artifact) {
-    const text = artifact.parts?.find(p => p.type === 'text')?.text || '';
-    return { text, contextId: newContextId };
+    const text = artifact.parts?.find(p => p.kind === 'text')?.text || '';
+    if (text) return { text, contextId: newContextId };
   }
-  const statusText = result?.status?.message?.parts?.find(p => p.type === 'text')?.text || 'No response received.';
-  return { text: statusText, contextId: newContextId };
+
+  // Fall back to last agent message in history
+  const history = result?.history || [];
+  const lastAgent = [...history].reverse().find(m => m.role === 'agent');
+  if (lastAgent) {
+    const text = lastAgent.parts?.find(p => p.kind === 'text')?.text || '';
+    if (text) return { text, contextId: newContextId };
+  }
+
+  return { text: 'No response received.', contextId: newContextId };
 }
 
 export default function NominationEta() {

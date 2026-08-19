@@ -222,12 +222,21 @@ class NominationETAAgent:
             tool_list = list(tools) if tools else []
             logger.info("Running agent with %d tool(s): %s", len(tool_list), [t.name for t in tool_list])
 
-            graph = create_react_agent(
-                llm,
-                tools=tool_list,
-                checkpointer=self._checkpointer,
-                state_modifier=system_prompt,
-            )
+            # LangGraph >=1.0 uses `prompt`; older versions used `state_modifier`
+            try:
+                graph = create_react_agent(
+                    llm,
+                    tools=tool_list,
+                    checkpointer=self._checkpointer,
+                    prompt=system_prompt,
+                )
+            except TypeError:
+                graph = create_react_agent(
+                    llm,
+                    tools=tool_list,
+                    checkpointer=self._checkpointer,
+                    state_modifier=system_prompt,
+                )
             config = {"configurable": {"thread_id": context_id}}
             result = await graph.ainvoke({"messages": [HumanMessage(content=query)]}, config)
             self._touch(context_id)
@@ -239,7 +248,11 @@ class NominationETAAgent:
             yield {
                 "is_task_complete": True,
                 "require_user_input": False,
-                "content": f"I encountered an error while processing your request: {e}. Please try again.",
+                "content": (
+                    "⚠️ **Unable to process your request**\n\n"
+                    "The Nomination ETA Agent encountered an unexpected error. "
+                    "Please try again in a moment. If the problem persists, contact your system administrator."
+                ),
             }
 
     async def invoke(
