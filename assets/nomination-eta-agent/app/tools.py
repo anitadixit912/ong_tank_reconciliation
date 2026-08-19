@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 CAP_BASE_URL = os.environ.get("CAP_BASE_URL", "").rstrip("/")
 MST_API_KEY = os.environ.get("MST_API_KEY", "")
 MST_SECRET_KEY = os.environ.get("MST_SECRET_KEY", "")
-MST_BASE_URL = "https://api.myshiptracking.com/v1"
+MST_BASE_URL = "https://api.myshiptracking.com/api/v2"
 _TIMEOUT = 20.0
 
 _NOMINATIONS_ENDPOINT = "/reconciliation/getOpenNominations"
@@ -342,111 +342,156 @@ record_rejection_reason = StructuredTool(
 )
 
 
-# ── Tool 6: myshiptracking_lookup ────────────────────────────────────────────
+# ── Tool 6: get_port_vessel_etas ─────────────────────────────────────────────
+
+class GetPortVesselETAsInput(BaseModel):
+    unloco: str = Field(description="Port UN/LOCODE (e.g. USMOB for Mobile Alabama, USHOU for Houston)")
+
+
+async def _get_port_vessel_etas(unloco: str) -> str:
+    try:
+        if not MST_API_KEY:
+            return json.dumps({"status": "API_KEY_NOT_CONFIGURED", "message": "MST_API_KEY not set."})
+
+        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+            r = await client.get(
+                f"{MST_BASE_URL}/port/estimate",
+                headers={"Authorization": f"Bearer {MST_API_KEY}"},
+                params={"unloco": unloco},
+            )
+            r.raise_for_status()
+            data = r.json()
+
+        vessels = data.get("data", [])
+        if not vessels:
+            return json.dumps({"found": False, "unloco": unloco, "message": "No vessels with ETA found for this port."})
+
+        return json.dumps({
+            "found": True,
+            "unloco": unloco,
+            "total_vessels": len(vessels),
+            "vessels": [
+                {
+                    "vessel_name": v.get("vessel_name"),
+                    "imo": v.get("imo"),
+                    "mmsi": v.get("mmsi"),
+                    "vessel_type": v.get("vessel_type"),
+                    "flag": v.get("flag"),
+                    "eta_utc": v.get("eta_utc"),
+                    "eta_local": v.get("eta_local"),
+                    "current_area": v.get("area"),
+                }
+                for v in vessels
+            ],
+        }, indent=2)
+
+    except Exception as e:
+        return f"Error fetching port vessel ETAs for {unloco}: {e}"
+
+
+get_port_vessel_etas = StructuredTool(
+    name="get_port_vessel_etas",
+    description=(
+        "Get live ETA estimates for ALL vessels currently heading to a specific port, "
+        "using real-time AIS data from MyShipTracking. "
+        "Use the port UN/LOCODE (e.g. USMOB for Mobile Alabama). "
+        "This is the PRIMARY intelligence source — use it first to check if a nomination's vessel "
+        "already has a live ETA tracked at the destination port."
+    ),
+    args_schema=GetPortVesselETAsInput,
+    coroutine=_get_port_vessel_etas,
+    handle_tool_error=True,
+)
+
+
+# ── Tool 7: myshiptracking_lookup ─────────────────────────────────────────────
 
 class MyShipTrackingInput(BaseModel):
     vessel_name: str = Field(description="Vessel name from the nomination")
-    imo_number: str = Field(description="IMO number of the vessel (7-digit identifier)")
-    destination_port: str = Field(default="", description="Expected destination port (optional)")
+    imo_number: str = Field(default="", description="IMO number of the vessel (7-digit identifier, optional)")
+    destination_unloco: str = Field(default="", description="Destination port UN/LOCODE (e.g. USMOB)")
 
 
-async def _myshiptracking_lookup(vessel_name: str, imo_number: str, destination_port: str = "") -> str:
+async def _myshiptracking_lookup(vessel_name: str, imo_number: str = "", destination_unloco: str = "") -> str:
     try:
-        if not MST_API_KEY or not MST_SECRET_KEY:
-            return json.dumps({
-                "source": "myshiptracking.com",
-                "vessel_name": vessel_name,
-                "imo_number": imo_number,
-                "status": "API_KEYS_NOT_CONFIGURED",
-                "message": (
-                    "MST_API_KEY and MST_SECRET_KEY are not configured. "
-                    "Set them via: cf set-env nomination-eta-agent MST_API_KEY <key> && "
-                    "cf set-env nomination-eta-agent MST_SECRET_KEY <secret>"
-                ),
-            })
+        if not MST_API_KEY:
+            return json.dumps({"status": "API_KEY_NOT_CONFIGURED", "message": "MST_API_KEY not set."})
 
-        headers = {
-            "X-API-Key": MST_API_KEY,
-            "X-Secret-Key": MST_SECRET_KEY,
-            "Accept": "application/json",
-        }
+        headers = {"Authorization": f"Bearer {MST_API_KEY}"}
 
         async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+            # Step 1 — search vessel by name
             search_r = await client.get(
-                f"{MST_BASE_URL}/vessels/search",
-                params={"q": vessel_name},
+                f"{MST_BASE_URL}/vessel/search",
                 headers=headers,
+                params={"name": vessel_name},
             )
             search_r.raise_for_status()
-            search_results = search_r.json()
+            vessels = search_r.json().get("data", [])
 
-            vessels = search_results.get("vessels") or (search_results if isinstance(search_results, list) else [])
             if not vessels:
-                return json.dumps({
-                    "source": "myshiptracking.com",
-                    "vessel_name": vessel_name,
-                    "imo_number": imo_number,
-                    "found": False,
-                    "message": f"No vessel found matching name '{vessel_name}'.",
-                })
+                return json.dumps({"found": False, "vessel_name": vessel_name, "message": f"No vessel found matching '{vessel_name}'."})
 
-            matched = next(
-                (v for v in vessels if str(v.get("imo", "")).strip() == str(imo_number).strip()),
-                vessels[0],
-            )
-            mmsi = matched.get("mmsi", "")
+            # Match by IMO if provided, else first result
+            if imo_number:
+                matched = next((v for v in vessels if str(v.get("imo", "")).strip() == str(imo_number).strip()), vessels[0])
+            else:
+                matched = vessels[0]
 
+            mmsi = matched.get("mmsi")
             if not mmsi:
-                return json.dumps({
-                    "source": "myshiptracking.com",
-                    "found": False,
-                    "message": "Vessel found by name but MMSI not available — cannot retrieve live status.",
-                })
+                return json.dumps({"found": False, "vessel_name": vessel_name, "message": "Vessel found but MMSI not available."})
 
-            status_r = await client.get(f"{MST_BASE_URL}/vessels/{mmsi}/status", headers=headers)
-            status_r.raise_for_status()
-            v = status_r.json()
-
+            # Step 2 — if destination port known, check port estimates for this vessel
             port_eta = None
-            if destination_port:
+            if destination_unloco:
                 try:
-                    eta_r = await client.get(
-                        f"{MST_BASE_URL}/ports/{destination_port}/estimates",
-                        params={"mmsi": mmsi},
+                    port_r = await client.get(
+                        f"{MST_BASE_URL}/port/estimate",
                         headers=headers,
+                        params={"unloco": destination_unloco},
                     )
-                    if eta_r.status_code == 200:
-                        port_eta = eta_r.json()
+                    if port_r.status_code == 200:
+                        port_vessels = port_r.json().get("data", [])
+                        port_eta = next((v for v in port_vessels if v.get("mmsi") == mmsi), None)
                 except Exception:
                     pass
 
         result = {
-            "source": "myshiptracking.com",
             "found": True,
-            "vessel_name": v.get("vessel_name", vessel_name),
-            "imo_number": imo_number,
+            "source": "myshiptracking.com",
+            "vessel_name": matched.get("vessel_name", vessel_name),
+            "imo": matched.get("imo"),
             "mmsi": mmsi,
-            "current_port": v.get("current_port", ""),
-            "destination_port": v.get("destination", destination_port),
-            "eta": v.get("eta") or (port_eta.get("eta") if port_eta else None),
-            "speed_knots": v.get("speed", ""),
-            "navigational_status": v.get("navigational_status", ""),
-            "last_updated": v.get("timestamp", ""),
+            "vessel_type": matched.get("vessel_type"),
+            "flag": matched.get("flag"),
+            "current_area": matched.get("area"),
         }
+
         if port_eta:
-            result["port_eta_details"] = port_eta
+            result["live_eta"] = {
+                "destination_port": destination_unloco,
+                "eta_utc": port_eta.get("eta_utc"),
+                "eta_local": port_eta.get("eta_local"),
+            }
+        else:
+            result["note"] = (
+                f"Vessel found but no live ETA tracked for port {destination_unloco}. "
+                "It may not be heading there currently."
+            ) if destination_unloco else "Provide destination_unloco to get live port ETA."
 
         return json.dumps(result, indent=2)
 
     except Exception as e:
-        return f"Error querying myshiptracking.com for {vessel_name} (IMO {imo_number}): {e}"
+        return f"Error looking up vessel '{vessel_name}': {e}"
 
 
 myshiptracking_lookup = StructuredTool(
     name="myshiptracking_lookup",
     description=(
-        "Look up a vessel's live position, destination, and ETA from myshiptracking.com "
-        "using vessel name and IMO number."
+        "Look up a specific vessel by name and get its live ETA at a destination port. "
+        "Searches MyShipTracking AIS database by vessel name, matches by IMO if provided, "
+        "then checks if vessel has a live ETA tracked at the destination port UN/LOCODE."
     ),
     args_schema=MyShipTrackingInput,
     coroutine=_myshiptracking_lookup,
@@ -594,10 +639,11 @@ def get_nomination_eta_tools() -> list[StructuredTool]:
     return [
         list_nominations,
         get_nomination,
+        get_port_vessel_etas,
+        myshiptracking_lookup,
         get_nomination_history,
         get_nomination_history_deep,
         record_rejection_reason,
-        myshiptracking_lookup,
         update_nomination_eta,
         update_nomination_events,
     ]
