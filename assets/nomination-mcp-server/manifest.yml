@@ -1,0 +1,20 @@
+---
+applications:
+  - name: nomination-mcp-server
+    memory: 256M
+    disk_quota: 1G
+    instances: 1
+    buildpacks:
+      - python_buildpack
+    command: gunicorn --worker-class uvicorn.workers.UvicornWorker --workers 1 --bind 0.0.0.0:${PORT} --chdir app server:app
+    timeout: 180
+    health-check-type: http
+    health-check-http-endpoint: /health
+    services:
+      - proj-vector-destination-service
+    env:
+      LOG_LEVEL: INFO
+      CAP_BASE_URL: https://tank-reconciliation-cap-srv-patient-leopard-kw.cfapps.us10.hana.ondemand.com
+      S4HANA_DESTINATION_NAME: OGS_S4
+      MST_API_KEY: TK%hArrBu7I%TBsNbip5dZmvnk8*Q%4Ljc
+      MCP_SERVER_PUBLIC_URL: https://nomination-mcp-server.cfapps.us10.hana.ondemand.com

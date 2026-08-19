@@ -20,6 +20,7 @@ applications:
       LOG_LEVEL: INFO
       AGENT_LLM_MODEL: gpt-4o
       AGENT_PUBLIC_URL: https://nomination-eta-agent.cfapps.us10.hana.ondemand.com
+      NOMINATION_MCP_SERVER_URL: https://nomination-mcp-server.cfapps.us10.hana.ondemand.com
       #   cf set-env nomination-eta-agent MST_API_KEY <your-key>
       #   cf set-env nomination-eta-agent MST_SECRET_KEY <your-secret>
       # Get keys from: https://www.myshiptracking.com (Account → API Access)
