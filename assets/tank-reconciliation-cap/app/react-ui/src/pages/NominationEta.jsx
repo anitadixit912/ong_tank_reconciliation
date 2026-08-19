@@ -25,14 +25,17 @@ const SESSION_KEY = 'nomination_eta_chat_history';
 function MarkdownText({ text }) {
   const lines = (text || '').split('\n');
   return (
-    <div>
+    <div style={{ lineHeight: '1.6' }}>
       {lines.map((line, i) => {
-        if (line.startsWith('### ')) return <div key={i} style={{ fontWeight: 700, fontSize: '0.95rem', marginTop: '0.5rem' }}>{renderInline(line.slice(4))}</div>;
-        if (line.startsWith('## '))  return <div key={i} style={{ fontWeight: 700, fontSize: '1rem', marginTop: '0.5rem' }}>{renderInline(line.slice(3))}</div>;
-        if (line.startsWith('# '))   return <div key={i} style={{ fontWeight: 700, fontSize: '1.05rem', marginTop: '0.5rem' }}>{renderInline(line.slice(2))}</div>;
-        if (line.startsWith('- ') || line.startsWith('* ')) return <div key={i} style={{ paddingLeft: '1rem', display: 'flex', gap: '0.4rem' }}><span>•</span><span>{renderInline(line.slice(2))}</span></div>;
-        if (line.match(/^\d+\.\s/)) return <div key={i} style={{ paddingLeft: '1rem' }}>{renderInline(line)}</div>;
-        if (line.trim() === '') return <div key={i} style={{ height: '0.4rem' }} />;
+        if (line.startsWith('### ')) return <div key={i} style={{ fontWeight: 700, fontSize: '0.95rem', marginTop: '0.75rem', marginBottom: '0.2rem' }}>{renderInline(line.slice(4))}</div>;
+        if (line.startsWith('## '))  return <div key={i} style={{ fontWeight: 700, fontSize: '1rem', marginTop: '0.75rem', marginBottom: '0.2rem', borderBottom: '1px solid rgba(0,0,0,0.1)', paddingBottom: '0.2rem' }}>{renderInline(line.slice(3))}</div>;
+        if (line.startsWith('# '))   return <div key={i} style={{ fontWeight: 700, fontSize: '1.05rem', marginTop: '0.75rem', marginBottom: '0.2rem' }}>{renderInline(line.slice(2))}</div>;
+        if (line.match(/^---+$/) || line.match(/^\*\*\*+$/)) return <hr key={i} style={{ border: 'none', borderTop: '1px solid rgba(0,0,0,0.12)', margin: '0.5rem 0' }} />;
+        if (line.match(/^\s{2,}- /) || line.match(/^\s{2,}\* /)) return <div key={i} style={{ paddingLeft: '2rem', display: 'flex', gap: '0.4rem', marginTop: '0.1rem' }}><span style={{ color: '#888' }}>◦</span><span>{renderInline(line.replace(/^\s+[-*]\s/, ''))}</span></div>;
+        if (line.startsWith('- ') || line.startsWith('* ')) return <div key={i} style={{ paddingLeft: '1rem', display: 'flex', gap: '0.5rem', marginTop: '0.15rem' }}><span>•</span><span>{renderInline(line.slice(2))}</span></div>;
+        if (line.match(/^\d+\.\s/)) return <div key={i} style={{ paddingLeft: '1rem', marginTop: '0.15rem' }}>{renderInline(line)}</div>;
+        if (line.startsWith('> ')) return <div key={i} style={{ borderLeft: '3px solid #0070f2', paddingLeft: '0.75rem', color: '#555', fontStyle: 'italic', margin: '0.25rem 0' }}>{renderInline(line.slice(2))}</div>;
+        if (line.trim() === '') return <div key={i} style={{ height: '0.5rem' }} />;
         return <div key={i}>{renderInline(line)}</div>;
       })}
     </div>
@@ -44,7 +47,7 @@ function renderInline(text) {
   return parts.map((part, i) => {
     if (part.startsWith('**') && part.endsWith('**')) return <strong key={i}>{part.slice(2, -2)}</strong>;
     if (part.startsWith('*') && part.endsWith('*'))   return <em key={i}>{part.slice(1, -1)}</em>;
-    if (part.startsWith('`') && part.endsWith('`'))   return <code key={i} style={{ background: 'rgba(0,0,0,0.08)', borderRadius: '3px', padding: '0 3px', fontSize: '0.85em' }}>{part.slice(1, -1)}</code>;
+    if (part.startsWith('`') && part.endsWith('`'))   return <code key={i} style={{ background: 'rgba(0,0,0,0.1)', borderRadius: '3px', padding: '1px 4px', fontSize: '0.82em', fontFamily: 'monospace' }}>{part.slice(1, -1)}</code>;
     return part;
   });
 }
@@ -182,7 +185,7 @@ export default function NominationEta() {
                 background: msg.role === 'user' ? '#0070f2' : msg.isError ? '#ffd0d0' : '#f0f2f5',
                 color: msg.role === 'user' ? '#ffffff' : '#1d2d3e',
                 boxShadow: '0 1px 4px rgba(0,0,0,0.10)',
-                whiteSpace: 'pre-wrap',
+                whiteSpace: msg.role === 'user' ? 'pre-wrap' : 'normal',
                 fontSize: '0.875rem',
                 lineHeight: '1.5',
               }}>
