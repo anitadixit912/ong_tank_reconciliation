@@ -7,6 +7,7 @@ import AuditTrail    from './pages/AuditTrail.jsx';
 import Configuration from './pages/Configuration.jsx';
 import TrendChart    from './pages/TrendChart.jsx';
 import AiChat        from './pages/AiChat.jsx';
+import NominationEta from './pages/NominationEta.jsx';
 import NotificationBell from './components/NotificationBell.jsx';
 import { AuthProvider, useAuth } from './AuthContext.jsx';
 
@@ -30,6 +31,7 @@ function AppShell() {
     { to: '/trends',        label: '📈 Variance Trends',            show: true },
     { to: '/configuration', label: '⚙️  Configuration',            show: user?.isAdmin },
     { to: '/chat',          label: '💬 AI Assistant',               show: true },
+    { to: '/nomination-eta', label: '🚢 Nomination ETA Agent',       show: true },
   ];
 
   return (
@@ -78,6 +80,7 @@ function AppShell() {
               </ProtectedRoute>
             } />
             <Route path="/chat"            element={<AiChat />} />
+            <Route path="/nomination-eta" element={<NominationEta />} />
             <Route path="*"               element={<Navigate to="/" replace />} />
           </Routes>
         </div>

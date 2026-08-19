@@ -4,6 +4,12 @@
   "sessionTimeout": 1800,
   "routes": [
     {
+      "source": "^/nomination-eta/(.*)$",
+      "target": "/$1",
+      "destination": "nomination-eta-agent",
+      "authenticationType": "none"
+    },
+    {
       "source": "^/(.*)$",
       "target": "/$1",
       "destination": "cap-backend",

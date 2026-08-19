@@ -35,5 +35,5 @@ applications:
       - tank-reconciliation-xsuaa
     env:
       destinations: >
-        [{"name":"cap-backend","url":"https://tank-reconciliation-cap-srv-patient-leopard-kw.cfapps.us10.hana.ondemand.com","forwardAuthToken":true}]
+        [{"name":"cap-backend","url":"https://tank-reconciliation-cap-srv-patient-leopard-kw.cfapps.us10.hana.ondemand.com","forwardAuthToken":true},{"name":"nomination-eta-agent","url":"https://nomination-eta-agent.cfapps.us10.hana.ondemand.com","forwardAuthToken":false}]
       UAA_SERVICE_NAME: tank-reconciliation-xsuaa
