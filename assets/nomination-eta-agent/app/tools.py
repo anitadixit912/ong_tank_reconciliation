@@ -176,7 +176,7 @@ async def _get_nomination_history(material: str, location: str, transport_system
             "found": True,
             "combination": {"material": material, "location": location, "transport_system": transport_system},
             "statistics": stats,
-            "recent_records": records[:5],
+            "all_records": records,
         }, indent=2, default=str)
 
     except Exception as e:
@@ -280,7 +280,7 @@ async def _get_nomination_history_deep(
                 "shipments_in_same_month_historically": len(seasonal_lt),
             },
             "effective_analysis": _compute_stats(effective_lead_times, records),
-            "recent_records": records[:5],
+            "recent_records": records,
         }
 
         return json.dumps(result, indent=2, default=str)

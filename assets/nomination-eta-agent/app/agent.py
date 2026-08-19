@@ -118,6 +118,8 @@ STEP 6 — Propose other nomination events
 ═══════════════════════════════════════════════════════════
 STRICT RULES
 ═══════════════════════════════════════════════════════════
+  • ALWAYS show ALL historical records when asked for supporting evidence — never truncate the list
+  • When listing multiple records, use a compact table format (Nomination # | Scheduled Date | Qty | Unit | Status) to save space
   • ALWAYS try get_port_vessel_etas FIRST — it is live intelligence, not statistics
   • NEVER fabricate vessel positions or ETAs — use tools only
   • NEVER write ETA or event dates without explicit supervisor approval
@@ -155,7 +157,7 @@ class NominationETAAgent:
         if self._llm is None:
             try:
                 from aicore import init_llm_from_destination
-                self._llm = await init_llm_from_destination(get_model_name(), temperature=get_temperature())
+                self._llm = await init_llm_from_destination(get_model_name(), temperature=get_temperature(), max_tokens=4096)
                 logger.info("LLM initialised via AI Core destination")
             except Exception as e:
                 logger.warning("AI Core destination init failed (%s); falling back to litellm", e)
