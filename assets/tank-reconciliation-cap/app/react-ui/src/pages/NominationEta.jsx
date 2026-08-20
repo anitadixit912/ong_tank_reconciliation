@@ -173,7 +173,15 @@ export default function NominationEta() {
   const [form, setForm]             = useState(EMPTY_FORM);
   const [creating, setCreating]     = useState(false);
   const [createMsg, setCreateMsg]   = useState(null);
+  const [valueHelps, setValueHelps] = useState({ locations: [], materials: [], transportSystems: [], quantityUnits: [] });
   const bottomRef                   = useRef(null);
+
+  useEffect(() => {
+    fetch('/reconciliation/getNominationValueHelps', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
+      .then(r => r.json())
+      .then(d => { if (d?.value) setValueHelps(d.value); })
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     try { sessionStorage.setItem(SESSION_KEY, JSON.stringify(messages)); } catch (_) {}
@@ -289,18 +297,30 @@ export default function NominationEta() {
               </div>
               <div>
                 <Label>Location ID *</Label>
-                <Input placeholder="e.g. USMOB" style={{ width: '100%' }} value={form.Locationid}
-                  onInput={e => setField('Locationid', e.target.value)} />
+                <Select style={{ width: '100%' }} onChange={e => setField('Locationid', e.detail.selectedOption.value)}>
+                  <Option value="">-- Select --</Option>
+                  {valueHelps.locations.map(l => (
+                    <Option key={l.Locationid} value={l.Locationid} selected={form.Locationid === l.Locationid}>{l.Locationid}</Option>
+                  ))}
+                </Select>
               </div>
               <div>
                 <Label>Transport System *</Label>
-                <Input placeholder="e.g. BARGE_1743" style={{ width: '100%' }} value={form.Transportsystem}
-                  onInput={e => setField('Transportsystem', e.target.value)} />
+                <Select style={{ width: '100%' }} onChange={e => setField('Transportsystem', e.detail.selectedOption.value)}>
+                  <Option value="">-- Select --</Option>
+                  {valueHelps.transportSystems.map(t => (
+                    <Option key={t.Transportsystem} value={t.Transportsystem} selected={form.Transportsystem === t.Transportsystem}>{t.Transportsystem}</Option>
+                  ))}
+                </Select>
               </div>
               <div style={{ gridColumn: '1/-1' }}>
                 <Label>Material *</Label>
-                <Input placeholder="e.g. BLK_GASOLINE 87" style={{ width: '100%' }} value={form.Demandmaterial}
-                  onInput={e => setField('Demandmaterial', e.target.value)} />
+                <Select style={{ width: '100%' }} onChange={e => setField('Demandmaterial', e.detail.selectedOption.value)}>
+                  <Option value="">-- Select --</Option>
+                  {valueHelps.materials.map(m => (
+                    <Option key={m.Demandmaterial} value={m.Demandmaterial} selected={form.Demandmaterial === m.Demandmaterial}>{m.Demandmaterial}</Option>
+                  ))}
+                </Select>
               </div>
               <div>
                 <Label>Quantity *</Label>
@@ -310,9 +330,12 @@ export default function NominationEta() {
               <div>
                 <Label>Unit</Label>
                 <Select style={{ width: '100%' }} onChange={e => setField('Quantityunit', e.detail.selectedOption.value)}>
-                  <Option value="BLL" selected={form.Quantityunit === 'BLL'}>BLL (Barrels)</Option>
-                  <Option value="TNE" selected={form.Quantityunit === 'TNE'}>TNE (Tonnes)</Option>
-                  <Option value="GAL" selected={form.Quantityunit === 'GAL'}>GAL (Gallons)</Option>
+                  {(valueHelps.quantityUnits.length ? valueHelps.quantityUnits : [
+                    { Unit: 'BLL', Description: 'Barrels' },
+                    { Unit: 'TNE', Description: 'Tonnes' },
+                  ]).map(u => (
+                    <Option key={u.Unit} value={u.Unit} selected={form.Quantityunit === u.Unit}>{u.Unit} ({u.Description})</Option>
+                  ))}
                 </Select>
               </div>
               <div>

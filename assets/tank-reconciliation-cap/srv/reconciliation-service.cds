@@ -105,6 +105,14 @@ service ReconciliationService @(path: '/reconciliation')
     Transportsystem  : String(10);
   };
 
+  // ─── Value helps for nomination creation ─────────────────────────────────
+  action getNominationValueHelps() returns {
+    locations      : array of { Locationid: String(10) };
+    materials      : array of { Demandmaterial: String(40) };
+    transportSystems : array of { Transportsystem: String(10) };
+    quantityUnits  : array of { Unit: String(3); Description: String(20) };
+  };
+
   // ─── Create Nomination in S/4HANA OGS TSW ────────────────────────────────
   action createNomination(
     Scheduleddate   : String(10),

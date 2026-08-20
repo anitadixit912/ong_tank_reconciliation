@@ -897,6 +897,22 @@ module.exports = class ReconciliationService extends cds.ApplicationService {
       return codes;
     });
 
+    // ── getNominationValueHelps ──────────────────────────────────────────────
+    this.on('getNominationValueHelps', async (req) => {
+      const nominations = await _fetchOpenNominations();
+      const locations       = [...new Set(nominations.map(n => n.Locationid).filter(Boolean))].sort().map(v => ({ Locationid: v }));
+      const materials       = [...new Set(nominations.map(n => n.Demandmaterial).filter(Boolean))].sort().map(v => ({ Demandmaterial: v }));
+      const transportSystems = [...new Set(nominations.map(n => n.Transportsystem).filter(Boolean))].sort().map(v => ({ Transportsystem: v }));
+      const quantityUnits   = [
+        { Unit: 'BLL', Description: 'Barrels' },
+        { Unit: 'TNE', Description: 'Tonnes' },
+        { Unit: 'GAL', Description: 'Gallons' },
+        { Unit: 'LTR', Description: 'Litres' },
+        { Unit: 'M3',  Description: 'Cubic Metres' },
+      ];
+      return { locations, materials, transportSystems, quantityUnits };
+    });
+
     // ── createNomination ─────────────────────────────────────────────────────
     this.on('createNomination', async (req) => {
       const { Scheduleddate, Locationid, Demandmaterial, Nominatedqty, Quantityunit, Transportsystem, Itemtype } = req.data;
