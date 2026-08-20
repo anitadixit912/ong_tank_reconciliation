@@ -31,7 +31,7 @@ function AppShell() {
     { to: '/trends',        label: '📈 Variance Trends',            show: true },
     { to: '/configuration', label: '⚙️  Configuration',            show: user?.isAdmin },
     { to: '/chat',          label: '💬 AI Assistant',               show: true },
-    { to: '/nomination-eta', label: '🚢 Nomination ETA Agent',       show: true },
+    { to: '/nomination-eta', label: '🚢 TSW Nomination Agent',       show: true },
   ];
 
   return (

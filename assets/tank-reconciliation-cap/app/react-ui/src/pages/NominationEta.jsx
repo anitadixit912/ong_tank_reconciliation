@@ -179,7 +179,10 @@ export default function NominationEta() {
   useEffect(() => {
     fetch('/reconciliation/getNominationValueHelps', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
       .then(r => r.json())
-      .then(d => { if (d?.value) setValueHelps(d.value); })
+      .then(d => {
+        const vh = d?.value || d;
+        if (vh?.locations) setValueHelps(vh);
+      })
       .catch(() => {});
   }, []);
 
@@ -263,7 +266,7 @@ export default function NominationEta() {
         <Link to="/" style={{ color: '#0070f3', textDecoration: 'none', fontSize: '0.875rem' }}>← Dashboard</Link>
       </div>
       <FlexBox direction="Row" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
-        <Title level="H3">🚢 Nomination ETA Agent</Title>
+        <Title level="H3">🚢 TSW Nomination Agent</Title>
         <FlexBox direction="Row" style={{ gap: '0.5rem' }}>
           <Button design="Emphasized" icon="add" onClick={() => { setShowCreate(true); setCreateMsg(null); }}>
             Create Nomination
