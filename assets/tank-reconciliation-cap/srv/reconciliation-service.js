@@ -903,6 +903,43 @@ module.exports = class ReconciliationService extends cds.ApplicationService {
       return nominations;
     });
 
+    // ── getNominationVesselDetails ───────────────────────────────────────────
+    this.on('getNominationVesselDetails', async (req) => {
+      const { nominationNumber, itemNumber } = req.data;
+      try {
+        const cfg     = await _resolveDestination(S4HANA_DESTINATION);
+        const baseUrl = (cfg.URL || cfg.url || '').replace(/\/$/, '');
+        if (!baseUrl) return { Nominationnumber: nominationNumber, rawJson: '{"error":"No S4HANA destination URL"}' };
+
+        const authHeader = _basicAuthHeader(cfg);
+        const headers = { Accept: 'application/json' };
+        if (authHeader) headers['Authorization'] = authHeader;
+        const proxyOpts = cfg._proxyHost ? { host: cfg._proxyHost, port: cfg._proxyPort, token: cfg._proxyToken, locationId: cfg._locationId } : null;
+
+        const itemNo = itemNumber || '0000000020';
+        // Fetch individual nomination entity — may expose more fields than the set query
+        const path = `${S4_DIP_PATH}/NominationSet(Nominationnumber='${nominationNumber}',Itemnumber='${itemNo}')?$format=json`;
+        const res = await _httpGet(baseUrl + path, headers, proxyOpts);
+        const raw = res.body;
+
+        let parsed = {};
+        try { parsed = JSON.parse(raw).d || {}; } catch(_) {}
+
+        return {
+          Nominationnumber: nominationNumber,
+          Itemnumber:       itemNo,
+          Vesselname:       parsed.Vesselname || parsed.Shipname || parsed.VesselName || '',
+          Imonumber:        parsed.Imonumber  || parsed.ImoNo    || parsed.IMO_NO    || '',
+          Callsign:         parsed.Callsign   || parsed.CallSign || '',
+          Originport:       parsed.Originport || parsed.LocidFrom || parsed.LOCID_FROM || '',
+          Destinationport:  parsed.Destinationport || parsed.LocidTo || parsed.LOCID_TO || '',
+          rawJson:          raw.slice(0, 2000),
+        };
+      } catch (e) {
+        return { Nominationnumber: nominationNumber, rawJson: `{"error":"${e.message}"}` };
+      }
+    });
+
     return super.init();
   }
 };

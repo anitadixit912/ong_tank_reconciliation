@@ -248,6 +248,50 @@ async def search_vessel(vessel_name: str, imo_number: str = "", destination_unlo
 
 
 @mcp.tool()
+async def get_nomination_vessel_details(nomination_number: str, item_number: str = "0000000020") -> str:
+    """Get vessel details (name, IMO, origin port, destination port) for a specific nomination
+    by fetching the individual nomination entity from S/4HANA OGS.
+    Returns vessel name and IMO number which can then be used for live MyShipTracking lookup."""
+    try:
+        normalized = nomination_number.strip().zfill(20) if nomination_number.strip().lstrip("0").isdigit() else nomination_number.strip()
+        data = await _cap_post("/reconciliation/getNominationVesselDetails", {
+            "nominationNumber": normalized,
+            "itemNumber": item_number,
+        })
+        raw_json = data.get("rawJson", "{}")
+        vessel_name = data.get("Vesselname", "")
+        imo = data.get("Imonumber", "")
+        origin = data.get("Originport", "")
+        destination = data.get("Destinationport", "")
+
+        if not vessel_name and not imo:
+            import json as _json
+            try:
+                raw = _json.loads(raw_json)
+                return json.dumps({
+                    "found": False,
+                    "nomination_number": normalized,
+                    "message": "Vessel name and IMO not available in NominationSet. The S/4HANA OGS custom service (ZTANK_DIP_SRV_SRV) does not expose vessel fields yet.",
+                    "all_fields_returned": list(raw.get("d", raw).keys()) if isinstance(raw.get("d", raw), dict) else [],
+                    "note": "Request ABAP team to add WTMKO-SHIPNAME and WTMKO-IMO_NO fields to NominationSet entity in ZTANK_DIP_SRV_SRV.",
+                })
+            except Exception:
+                pass
+
+        return json.dumps({
+            "found": True,
+            "nomination_number": normalized,
+            "vessel_name": vessel_name,
+            "imo_number": imo,
+            "call_sign": data.get("Callsign", ""),
+            "origin_port": origin,
+            "destination_port": destination,
+        }, indent=2)
+    except Exception as e:
+        return f"Error fetching vessel details for nomination {nomination_number}: {e}"
+
+
+@mcp.tool()
 async def get_nomination_history(material: str, location: str, transport_system: str) -> str:
     """Get historical nominations for a material + location + transport system combination.
     Returns all matching records with scheduled dates, quantities, and basic statistics."""

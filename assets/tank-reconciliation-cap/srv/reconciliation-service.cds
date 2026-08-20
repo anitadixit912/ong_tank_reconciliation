@@ -104,5 +104,17 @@ service ReconciliationService @(path: '/reconciliation')
     Nomstatus        : String(1);
     Transportsystem  : String(10);
   };
+
+  // ─── Nomination vessel details via TSW OData individual entity fetch ──────
+  action getNominationVesselDetails(nominationNumber : String(20), itemNumber : String(10)) returns {
+    Nominationnumber : String(20);
+    Itemnumber       : String(10);
+    Vesselname       : String(40);
+    Imonumber        : String(10);
+    Callsign         : String(10);
+    Originport       : String(10);
+    Destinationport  : String(10);
+    rawJson          : String;
+  };
 }
 

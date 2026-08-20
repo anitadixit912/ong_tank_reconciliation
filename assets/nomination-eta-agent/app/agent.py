@@ -47,21 +47,10 @@ STEP 1 — Retrieve the nomination
   Use get_nomination to fetch the full nomination record.
   If the nomination number is not found, use list_nominations to show available ones.
 
-STEP 2 — Check the destination port for live vessel ETAs (PRIMARY INTELLIGENCE)
-  Use get_port_vessel_etas with the nomination's Locationid as the UN/LOCODE.
-  This returns ALL vessels with live AIS-tracked ETAs heading to that port right now.
-
-  → Does the nomination have a vessel name?
-    YES: Match the vessel name against the port ETA list (by vessel_name or IMO).
-         If matched → present the live ETA. Go to STEP 5.
-    NO:  Present the full port ETA list to the supervisor and ask:
-         "Which of these vessels is carrying this nomination?"
-         Once supervisor identifies the vessel → present its live ETA. Go to STEP 5.
-
-  → If vessel is NOT in the port ETA list:
-    Try myshiptracking_lookup with the vessel name to find its current position/area.
-    If found but not heading to this port → inform supervisor of current vessel location.
-    Go to STEP 3 (historical fallback).
+STEP 2 — Get vessel details
+  Use get_nomination_vessel_details to fetch vessel name and IMO for the nomination.
+  → If vessel name found: go to STEP 3 (live AIS lookup)
+  → If not found: go to STEP 4 (port-level AIS lookup)
 
 ─────────────────────────────────────────────────────────
 STEP 3 — Historical fallback (when no live AIS data)
