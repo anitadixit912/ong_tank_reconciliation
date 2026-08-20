@@ -897,6 +897,97 @@ module.exports = class ReconciliationService extends cds.ApplicationService {
       return codes;
     });
 
+    // ── createNomination ─────────────────────────────────────────────────────
+    this.on('createNomination', async (req) => {
+      const { Scheduleddate, Locationid, Demandmaterial, Nominatedqty, Quantityunit, Transportsystem, Itemtype } = req.data;
+      try {
+        const cfg     = await _resolveDestination(S4HANA_DESTINATION);
+        const baseUrl = (cfg.URL || cfg.url || '').replace(/\/$/, '');
+        if (!baseUrl) return { success: false, message: 'S4HANA destination URL not found' };
+
+        const authHeader = _basicAuthHeader(cfg);
+        const proxyOpts  = cfg._proxyHost ? { host: cfg._proxyHost, port: cfg._proxyPort, token: cfg._proxyToken, locationId: cfg._locationId } : null;
+
+        // Step 1: Fetch CSRF token
+        const tokenHeaders = { Accept: 'application/json', 'x-csrf-token': 'Fetch' };
+        if (authHeader) tokenHeaders['Authorization'] = authHeader;
+        const tokenRes = await _httpGet(baseUrl + S4_DIP_PATH + '/NominationSet?$top=1&$format=json', tokenHeaders, proxyOpts);
+        const csrfToken    = (tokenRes.headers && (tokenRes.headers['x-csrf-token'] || tokenRes.headers['X-CSRF-Token'])) || null;
+        const sessionCookie = (tokenRes.headers && (tokenRes.headers['set-cookie'] || tokenRes.headers['Set-Cookie'])) || null;
+
+        // Step 2: POST new nomination
+        const body = JSON.stringify({
+          Nominationnumber: '00000000000000000000', // S4 will assign
+          Itemnumber:       '0000000010',
+          Itemtype:         Itemtype || 'D',
+          Itemstatus:       '1',
+          Nomstatus:        '1',
+          Scheduleddate,
+          Locationid,
+          Demandmaterial,
+          Nominatedqty:     String(Nominatedqty),
+          Quantityunit,
+          Transportsystem,
+        });
+
+        const postHeaders = { 'Content-Type': 'application/json', Accept: 'application/json' };
+        if (authHeader)   postHeaders['Authorization'] = authHeader;
+        if (csrfToken)    postHeaders['x-csrf-token']  = csrfToken;
+        if (sessionCookie) postHeaders['Cookie']       = Array.isArray(sessionCookie) ? sessionCookie.join('; ') : sessionCookie;
+
+        const postRes = await _httpPost(baseUrl + S4_DIP_PATH + '/NominationSet', body, postHeaders, proxyOpts);
+
+        if (postRes.status === 201 || postRes.status === 200) {
+          let created = {};
+          try { created = JSON.parse(postRes.body).d || {}; } catch(_) {}
+          return {
+            success: true,
+            Nominationnumber: created.Nominationnumber || '',
+            Itemnumber:       created.Itemnumber || '0000000010',
+            message: `Nomination ${created.Nominationnumber || ''} created successfully in S/4HANA OGS.`,
+          };
+        } else {
+          let errMsg = postRes.body?.slice(0, 300) || 'Unknown error';
+          try { errMsg = JSON.parse(postRes.body)?.error?.message?.value || errMsg; } catch(_) {}
+          return { success: false, Nominationnumber: '', Itemnumber: '', message: `S/4HANA error (${postRes.status}): ${errMsg}` };
+        }
+      } catch (e) {
+        return { success: false, Nominationnumber: '', Itemnumber: '', message: `Error creating nomination: ${e.message}` };
+      }
+    });
+
+    // ── probeStandardTSWServices ─────────────────────────────────────────────
+    this.on('probeStandardTSWServices', async (req) => {
+      const results = {};
+      try {
+        const cfg = await _resolveDestination(S4HANA_DESTINATION);
+        const baseUrl = (cfg.URL || cfg.url || '').replace(/\/$/, '');
+        if (!baseUrl) return JSON.stringify({ error: 'No S4HANA destination URL' });
+        const authHeader = _basicAuthHeader(cfg);
+        const headers = { Accept: 'application/json' };
+        if (authHeader) headers['Authorization'] = authHeader;
+        const proxyOpts = cfg._proxyHost ? { host: cfg._proxyHost, port: cfg._proxyPort, token: cfg._proxyToken, locationId: cfg._locationId } : null;
+
+        const services = [
+          '/sap/opu/odata/sap/API_TSW_NOMINATION_SRV',
+          '/sap/opu/odata/sap/CATSBU_TSW_NOMINATION_SRV',
+          '/sap/opu/odata/sap/API_OIL_SCHD_TRANS_WORKBENCH_SRV',
+          '/sap/opu/odata/sap/API_OILGASTSW_NOMINATION_SRV',
+          '/sap/opu/odata/sap/ZTANK_DIP_SRV_SRV',
+        ];
+
+        for (const svc of services) {
+          try {
+            const r = await _httpGet(baseUrl + svc + '/$metadata', { ...headers, Accept: 'application/xml' }, proxyOpts);
+            const entitySets = (r.body.match(/EntitySet Name="([^"]+)"/g) || []).map(s => s.replace(/EntitySet Name="|"/g,''));
+            const hasVessel = r.body.toLowerCase().includes('vessel') || r.body.toLowerCase().includes('shipname') || r.body.toLowerCase().includes('imo');
+            results[svc] = { status: r.status, entitySets, hasVesselFields: hasVessel };
+          } catch(e) { results[svc] = { error: e.message }; }
+        }
+      } catch(e) { results.fatalError = e.message; }
+      return JSON.stringify(results, null, 2);
+    });
+
     // ── getOpenNominations ───────────────────────────────────────────────────
     this.on('getOpenNominations', async (req) => {
       const nominations = await _fetchOpenNominations();

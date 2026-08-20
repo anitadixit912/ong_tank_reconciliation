@@ -6,13 +6,26 @@ import {
   Input,
   Button,
   BusyIndicator,
+  Select,
+  Option,
+  Label,
 } from '@ui5/webcomponents-react';
 
+const EMPTY_FORM = {
+  Scheduleddate: '',
+  Locationid: '',
+  Demandmaterial: '',
+  Nominatedqty: '',
+  Quantityunit: 'BLL',
+  Transportsystem: '',
+  Itemtype: 'D',
+};
+
 const SUGGESTIONS = [
-  'Propose an ETA for nomination 4500001234',
-  'Look up vessel ETA for nomination 4500001234',
-  'What is the historical lead time for Diesel from USMOB via pipeline?',
-  'Update events for nomination 4500001234 based on history',
+  'List all open nominations',
+  'What vessels are currently heading to USMOB?',
+  'Propose an ETA for nomination 00000000000000000128',
+  'Show historical nominations for BLK_GASOLINE 87 at USMOB via BARGE_1743',
 ];
 
 const INITIAL_MESSAGE = {
@@ -153,10 +166,14 @@ export default function NominationEta() {
       return saved ? JSON.parse(saved) : [INITIAL_MESSAGE];
     } catch (_) { return [INITIAL_MESSAGE]; }
   });
-  const [input, setInput]       = useState('');
-  const [loading, setLoading]   = useState(false);
-  const [contextId, setContextId] = useState(null);
-  const bottomRef               = useRef(null);
+  const [input, setInput]           = useState('');
+  const [loading, setLoading]       = useState(false);
+  const [contextId, setContextId]   = useState(null);
+  const [showCreate, setShowCreate] = useState(false);
+  const [form, setForm]             = useState(EMPTY_FORM);
+  const [creating, setCreating]     = useState(false);
+  const [createMsg, setCreateMsg]   = useState(null);
+  const bottomRef                   = useRef(null);
 
   useEffect(() => {
     try { sessionStorage.setItem(SESSION_KEY, JSON.stringify(messages)); } catch (_) {}
@@ -200,6 +217,38 @@ export default function NominationEta() {
     sessionStorage.removeItem(SESSION_KEY);
   }
 
+  function setField(key, val) {
+    setForm(prev => ({ ...prev, [key]: val }));
+  }
+
+  async function submitCreateNomination() {
+    setCreating(true);
+    setCreateMsg(null);
+    try {
+      const res = await fetch('/reconciliation/createNomination', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(form),
+      });
+      const data = await res.json();
+      const result = data?.value || data;
+      if (result?.success) {
+        setCreateMsg({ ok: true, text: `✅ Nomination ${result.Nominationnumber || ''} created successfully!` });
+        setMessages(prev => [...prev, {
+          role: 'assistant',
+          text: `✅ **Nomination Created**\n\n- **Nomination #:** ${result.Nominationnumber}\n- **Material:** ${form.Demandmaterial}\n- **Location:** ${form.Locationid}\n- **Scheduled Date:** ${form.Scheduleddate}\n- **Quantity:** ${form.Nominatedqty} ${form.Quantityunit}\n- **Transport System:** ${form.Transportsystem}\n\nWould you like me to propose an ETA for this nomination?`,
+        }]);
+        setTimeout(() => { setShowCreate(false); setForm(EMPTY_FORM); setCreateMsg(null); }, 1500);
+      } else {
+        setCreateMsg({ ok: false, text: `❌ ${result?.message || 'Failed to create nomination'}` });
+      }
+    } catch (e) {
+      setCreateMsg({ ok: false, text: `❌ Error: ${e.message}` });
+    } finally {
+      setCreating(false);
+    }
+  }
+
   return (
     <FlexBox direction="Column" style={{ height: 'calc(100vh - 120px)', padding: '1rem', gap: '1rem' }}>
       <div style={{ marginBottom: '0.25rem' }}>
@@ -207,10 +256,96 @@ export default function NominationEta() {
       </div>
       <FlexBox direction="Row" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
         <Title level="H3">🚢 Nomination ETA Agent</Title>
-        <Button design="Transparent" style={{ fontSize: '0.8rem', color: '#888' }} onClick={clearChat}>
-          🗑 Clear Chat
-        </Button>
+        <FlexBox direction="Row" style={{ gap: '0.5rem' }}>
+          <Button design="Emphasized" icon="add" onClick={() => { setShowCreate(true); setCreateMsg(null); }}>
+            Create Nomination
+          </Button>
+          <Button design="Transparent" style={{ fontSize: '0.8rem', color: '#888' }} onClick={clearChat}>
+            🗑 Clear Chat
+          </Button>
+        </FlexBox>
       </FlexBox>
+
+      {/* Create Nomination Modal */}
+      {showCreate && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999,
+        }}>
+          <div style={{
+            background: '#fff', borderRadius: '12px', padding: '1.5rem',
+            width: '480px', maxWidth: '95vw', boxShadow: '0 8px 32px rgba(0,0,0,0.18)',
+          }}>
+            <FlexBox direction="Row" style={{ justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+              <Title level="H4">Create Nomination</Title>
+              <Button design="Transparent" onClick={() => setShowCreate(false)}>✕</Button>
+            </FlexBox>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+              <div style={{ gridColumn: '1/-1' }}>
+                <Label>Scheduled Date *</Label>
+                <Input type="Date" style={{ width: '100%' }} value={form.Scheduleddate}
+                  onInput={e => setField('Scheduleddate', e.target.value)} />
+              </div>
+              <div>
+                <Label>Location ID *</Label>
+                <Input placeholder="e.g. USMOB" style={{ width: '100%' }} value={form.Locationid}
+                  onInput={e => setField('Locationid', e.target.value)} />
+              </div>
+              <div>
+                <Label>Transport System *</Label>
+                <Input placeholder="e.g. BARGE_1743" style={{ width: '100%' }} value={form.Transportsystem}
+                  onInput={e => setField('Transportsystem', e.target.value)} />
+              </div>
+              <div style={{ gridColumn: '1/-1' }}>
+                <Label>Material *</Label>
+                <Input placeholder="e.g. BLK_GASOLINE 87" style={{ width: '100%' }} value={form.Demandmaterial}
+                  onInput={e => setField('Demandmaterial', e.target.value)} />
+              </div>
+              <div>
+                <Label>Quantity *</Label>
+                <Input type="Number" placeholder="e.g. 1000" style={{ width: '100%' }} value={form.Nominatedqty}
+                  onInput={e => setField('Nominatedqty', e.target.value)} />
+              </div>
+              <div>
+                <Label>Unit</Label>
+                <Select style={{ width: '100%' }} onChange={e => setField('Quantityunit', e.detail.selectedOption.value)}>
+                  <Option value="BLL" selected={form.Quantityunit === 'BLL'}>BLL (Barrels)</Option>
+                  <Option value="TNE" selected={form.Quantityunit === 'TNE'}>TNE (Tonnes)</Option>
+                  <Option value="GAL" selected={form.Quantityunit === 'GAL'}>GAL (Gallons)</Option>
+                </Select>
+              </div>
+              <div>
+                <Label>Item Type</Label>
+                <Select style={{ width: '100%' }} onChange={e => setField('Itemtype', e.detail.selectedOption.value)}>
+                  <Option value="D" selected={form.Itemtype === 'D'}>D (Demand)</Option>
+                  <Option value="O" selected={form.Itemtype === 'O'}>O (Order)</Option>
+                </Select>
+              </div>
+            </div>
+
+            {createMsg && (
+              <div style={{
+                marginTop: '0.75rem', padding: '0.6rem 1rem', borderRadius: '6px',
+                background: createMsg.ok ? '#e8f5e9' : '#fdecea',
+                color: createMsg.ok ? '#2e7d32' : '#c62828',
+                fontSize: '0.85rem',
+              }}>
+                {createMsg.text}
+              </div>
+            )}
+
+            <FlexBox direction="Row" style={{ gap: '0.5rem', marginTop: '1rem', justifyContent: 'flex-end' }}>
+              <Button design="Transparent" onClick={() => setShowCreate(false)} disabled={creating}>Cancel</Button>
+              <Button design="Emphasized" onClick={submitCreateNomination} disabled={creating ||
+                !form.Scheduleddate || !form.Locationid || !form.Demandmaterial ||
+                !form.Nominatedqty || !form.Transportsystem}>
+                {creating ? 'Creating…' : 'Create Nomination'}
+              </Button>
+            </FlexBox>
+          </div>
+        </div>
+      )}
 
       {/* Chat window */}
       <div style={{

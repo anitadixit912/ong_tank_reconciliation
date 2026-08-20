@@ -248,6 +248,39 @@ async def search_vessel(vessel_name: str, imo_number: str = "", destination_unlo
 
 
 @mcp.tool()
+async def create_nomination(
+    scheduled_date: str,
+    location_id: str,
+    material: str,
+    quantity: float,
+    quantity_unit: str,
+    transport_system: str,
+    item_type: str = "D",
+) -> str:
+    """Create a new nomination in S/4HANA OGS TSW.
+    scheduled_date: ISO date (YYYY-MM-DD)
+    location_id: UN/LOCODE or SAP location (e.g. USMOB)
+    material: material/product code (e.g. BLK_GASOLINE 87)
+    quantity: nominated quantity
+    quantity_unit: unit of measure (BLL=barrels, TNE=tonnes)
+    transport_system: transport system code (e.g. BARGE_1743)
+    item_type: D=Demand, O=Order (default D)"""
+    try:
+        data = await _cap_post("/reconciliation/createNomination", {
+            "Scheduleddate": scheduled_date,
+            "Locationid": location_id,
+            "Demandmaterial": material,
+            "Nominatedqty": quantity,
+            "Quantityunit": quantity_unit,
+            "Transportsystem": transport_system,
+            "Itemtype": item_type,
+        })
+        return json.dumps(data, indent=2)
+    except Exception as e:
+        return f"Error creating nomination: {e}"
+
+
+@mcp.tool()
 async def get_nomination_vessel_details(nomination_number: str, item_number: str = "0000000020") -> str:
     """Get vessel details (name, IMO, origin port, destination port) for a specific nomination
     by fetching the individual nomination entity from S/4HANA OGS.

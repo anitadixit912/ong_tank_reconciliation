@@ -105,7 +105,24 @@ service ReconciliationService @(path: '/reconciliation')
     Transportsystem  : String(10);
   };
 
-  // ─── Nomination vessel details via TSW OData individual entity fetch ──────
+  // ─── Create Nomination in S/4HANA OGS TSW ────────────────────────────────
+  action createNomination(
+    Scheduleddate   : String(10),
+    Locationid      : String(10),
+    Demandmaterial  : String(40),
+    Nominatedqty    : Decimal(13,3),
+    Quantityunit    : String(3),
+    Transportsystem : String(10),
+    Itemtype        : String(2)
+  ) returns {
+    success          : Boolean;
+    Nominationnumber : String(20);
+    Itemnumber       : String(10);
+    message          : String;
+  };
+
+  // ─── Probe standard SAP TSW OData services ───────────────────────────────
+  action probeStandardTSWServices() returns String;
   action getNominationVesselDetails(nominationNumber : String(20), itemNumber : String(10)) returns {
     Nominationnumber : String(20);
     Itemnumber       : String(10);
