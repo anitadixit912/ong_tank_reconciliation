@@ -5,7 +5,8 @@ applications:
     memory: 256M
     disk_quota: 1G
     instances: 1
-    random-route: true
+    routes:
+      - route: tank-reconciliation-cap-srv-patient-leopard-kw.cfapps.us10.hana.ondemand.com
     buildpacks:
       - nodejs_buildpack
     command: node node_modules/@sap/cds/bin/serve.js all --production
@@ -26,7 +27,8 @@ applications:
     memory: 128M
     disk_quota: 256M
     instances: 1
-    random-route: true
+    routes:
+      - route: tank-reconciliation-approuter-proud-jackal-qo.cfapps.us10.hana.ondemand.com
     buildpacks:
       - nodejs_buildpack
     health-check-type: process

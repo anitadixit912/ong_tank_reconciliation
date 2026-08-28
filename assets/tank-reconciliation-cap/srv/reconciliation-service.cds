@@ -107,25 +107,35 @@ service ReconciliationService @(path: '/reconciliation')
 
   // ─── Value helps for nomination creation ─────────────────────────────────
   action getNominationValueHelps() returns {
-    locations      : array of { Locationid: String(10) };
-    materials      : array of { Demandmaterial: String(40) };
+    locations        : array of { Locationid: String(10); Description: String(40) };
+    materials        : array of { Demandmaterial: String(40) };
     transportSystems : array of { Transportsystem: String(10) };
-    quantityUnits  : array of { Unit: String(3); Description: String(20) };
+    quantityUnits    : array of { Unit: String(3); Description: String(20) };
+    nominationTypes  : array of { Nominationtype: String(4); Description: String(36) };
+    itemTypes        : array of { Itemtype: String(2); Description: String(60) };
+    modesOfTransport : array of { ModeOfTransport: String(2); Description: String(20) };
+  };
+
+  // ─── Get Carrier and Shipper for a Transport System ──────────────────────
+  action getCarrierShipperByTS(Transportsystem: String(10)) returns {
+    Carrier         : String(10);
+    CarrierName     : String(35);
+    Shipper         : String(10);
+    ShipperName     : String(35);
   };
 
   // ─── Create Nomination in S/4HANA OGS TSW ────────────────────────────────
   action createNomination(
-    Scheduleddate   : String(10),
-    Locationid      : String(10),
-    Demandmaterial  : String(40),
-    Nominatedqty    : Decimal(13,3),
-    Quantityunit    : String(3),
+    Nominationtype  : String(4),
     Transportsystem : String(10),
-    Itemtype        : String(2)
+    Modeoftransport : String(2),
+    Vehicleid       : String(10),
+    Carrier         : String(10),
+    Shipper         : String(10),
+    Items           : String(5000)
   ) returns {
     success          : Boolean;
     Nominationnumber : String(20);
-    Itemnumber       : String(10);
     message          : String;
   };
 

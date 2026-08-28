@@ -635,6 +635,57 @@ def _months_ago(date_str: str, now: datetime) -> float:
 
 # ── Tool registry ─────────────────────────────────────────────────────────────
 
+class CreateNominationInput(BaseModel):
+    Locationid: str = Field(..., description="Location ID (e.g. USMOB)")
+    Demandmaterial: str = Field(..., description="Material number (e.g. BLK_GASOLINE 87)")
+    Nominatedqty: str = Field(..., description="Quantity as a string (e.g. '1000')")
+    Quantityunit: str = Field(..., description="Unit of measure (e.g. BBL, TNE)")
+    Transportsystem: str = Field(..., description="Transport system (e.g. BARGE_1743)")
+    Scheduleddate: str = Field(..., description="Scheduled date in YYYY-MM-DD format")
+
+
+async def _create_nomination(
+    Locationid: str,
+    Demandmaterial: str,
+    Nominatedqty: str,
+    Quantityunit: str,
+    Transportsystem: str,
+    Scheduleddate: str,
+) -> str:
+    try:
+        result = await _cap_post("/createNomination", {
+            "Locationid": Locationid,
+            "Demandmaterial": Demandmaterial,
+            "Nominatedqty": Nominatedqty,
+            "Quantityunit": Quantityunit,
+            "Transportsystem": Transportsystem,
+            "Scheduleddate": Scheduleddate,
+        })
+        if result.get("success"):
+            return (
+                f"Nomination created successfully.\n"
+                f"Nomination Number: {result.get('Nominationnumber', 'N/A')}\n"
+                f"Item Number: {result.get('Itemnumber', 'N/A')}\n"
+                f"Message: {result.get('message', '')}"
+            )
+        else:
+            return f"Failed to create nomination: {result.get('message', 'Unknown error')}"
+    except Exception as e:
+        return f"Error creating nomination: {str(e)}"
+
+
+create_nomination = StructuredTool.from_function(
+    coroutine=_create_nomination,
+    name="create_nomination",
+    description=(
+        "Create a new TSW nomination in S/4HANA OGS. "
+        "Requires: location ID, demand material, quantity, unit of measure, "
+        "transport system, and scheduled date (YYYY-MM-DD)."
+    ),
+    args_schema=CreateNominationInput,
+)
+
+
 def get_nomination_eta_tools() -> list[StructuredTool]:
     return [
         list_nominations,
@@ -646,4 +697,5 @@ def get_nomination_eta_tools() -> list[StructuredTool]:
         record_rejection_reason,
         update_nomination_eta,
         update_nomination_events,
+        create_nomination,
     ]

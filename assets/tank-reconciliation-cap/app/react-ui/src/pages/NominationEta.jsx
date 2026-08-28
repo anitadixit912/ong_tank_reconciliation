@@ -12,13 +12,14 @@ import {
 } from '@ui5/webcomponents-react';
 
 const EMPTY_FORM = {
-  Scheduleddate: '',
-  Locationid: '',
-  Demandmaterial: '',
-  Nominatedqty: '',
-  Quantityunit: 'BLL',
+  Nominationtype:  '',
   Transportsystem: '',
-  Itemtype: 'D',
+  Modeoftransport: '',
+  Vehicleid:       '',
+  Carrier:         '',
+  CarrierName:     '',
+  Shipper:         '',
+  ShipperName:     '',
 };
 
 const SUGGESTIONS = [
@@ -171,9 +172,10 @@ export default function NominationEta() {
   const [contextId, setContextId]   = useState(null);
   const [showCreate, setShowCreate] = useState(false);
   const [form, setForm]             = useState(EMPTY_FORM);
+  const [items, setItems]           = useState([{ Itemtype: '', Locationid: '', Demandmaterial: '', Nominatedqty: '', Quantityunit: '', Scheduleddate: '' }]);
   const [creating, setCreating]     = useState(false);
   const [createMsg, setCreateMsg]   = useState(null);
-  const [valueHelps, setValueHelps] = useState({ locations: [], materials: [], transportSystems: [], quantityUnits: [] });
+  const [valueHelps, setValueHelps] = useState({ locations: [], materials: [], transportSystems: [], quantityUnits: [], nominationTypes: [], itemTypes: [], modesOfTransport: [] });
   const bottomRef                   = useRef(null);
 
   useEffect(() => {
@@ -185,6 +187,24 @@ export default function NominationEta() {
       })
       .catch(() => {});
   }, []);
+
+  const onTransportsystemChange = async (ts) => {
+    setForm(f => ({ ...f, Transportsystem: ts, Carrier: '', CarrierName: '', Shipper: '', ShipperName: '' }));
+    if (!ts) return;
+    try {
+      const res = await fetch('/reconciliation/getCarrierShipperByTS', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ Transportsystem: ts })
+      });
+      const data = await res.json();
+      const val = data?.value || data;
+      if (val) setForm(f => ({ ...f, Carrier: val.Carrier || '', CarrierName: val.CarrierName || '', Shipper: val.Shipper || '', ShipperName: val.ShipperName || '' }));
+    } catch(_) {}
+  };
+
+  const addItem    = () => setItems(prev => [...prev, { Itemtype: '', Locationid: '', Demandmaterial: '', Nominatedqty: '', Quantityunit: '', Scheduleddate: '' }]);
+  const removeItem = (idx) => setItems(prev => prev.filter((_, i) => i !== idx));
+  const setItemField = (idx, field, value) => setItems(prev => prev.map((it, i) => i === idx ? { ...it, [field]: value } : it));
 
   useEffect(() => {
     try { sessionStorage.setItem(SESSION_KEY, JSON.stringify(messages)); } catch (_) {}
@@ -233,13 +253,39 @@ export default function NominationEta() {
   }
 
   async function submitCreateNomination() {
+    // Frontend validation
+    const errors = [];
+    if (!form.Nominationtype)  errors.push('Nomination Type is required');
+    if (!form.Transportsystem) errors.push('Transport System is required');
+    items.forEach((item, idx) => {
+      const n = idx + 1;
+      if (!item.Itemtype)      errors.push(`Item ${n}: Item Type is required`);
+      if (!item.Locationid)    errors.push(`Item ${n}: Location is required`);
+      if (!item.Demandmaterial) errors.push(`Item ${n}: Material is required`);
+      if (!item.Scheduleddate) errors.push(`Item ${n}: Scheduled Date is required`);
+      if (!item.Nominatedqty)  errors.push(`Item ${n}: Quantity is required`);
+      if (!item.Quantityunit)  errors.push(`Item ${n}: Unit is required`);
+    });
+    if (errors.length > 0) {
+      setCreateMsg({ ok: false, text: '❌ Please fix the following:\n• ' + errors.join('\n• ') });
+      return;
+    }
+
     setCreating(true);
     setCreateMsg(null);
     try {
       const res = await fetch('/reconciliation/createNomination', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(form),
+        body: JSON.stringify({
+          Nominationtype:  form.Nominationtype,
+          Transportsystem: form.Transportsystem,
+          Modeoftransport: form.Modeoftransport,
+          Vehicleid:       form.Vehicleid,
+          Carrier:         form.Carrier,
+          Shipper:         form.Shipper,
+          Items:           JSON.stringify(items),
+        }),
       });
       const data = await res.json();
       const result = data?.value || data;
@@ -247,9 +293,9 @@ export default function NominationEta() {
         setCreateMsg({ ok: true, text: `✅ Nomination ${result.Nominationnumber || ''} created successfully!` });
         setMessages(prev => [...prev, {
           role: 'assistant',
-          text: `✅ **Nomination Created**\n\n- **Nomination #:** ${result.Nominationnumber}\n- **Material:** ${form.Demandmaterial}\n- **Location:** ${form.Locationid}\n- **Scheduled Date:** ${form.Scheduleddate}\n- **Quantity:** ${form.Nominatedqty} ${form.Quantityunit}\n- **Transport System:** ${form.Transportsystem}\n\nWould you like me to propose an ETA for this nomination?`,
+          text: `✅ **Nomination Created**\n\n- **Nomination #:** ${result.Nominationnumber}\n- **Transport System:** ${form.Transportsystem}\n- **Type:** ${form.Nominationtype}\n- **Items:** ${items.length}\n\nWould you like me to propose an ETA for this nomination?`,
         }]);
-        setTimeout(() => { setShowCreate(false); setForm(EMPTY_FORM); setCreateMsg(null); }, 1500);
+        setTimeout(() => { setShowCreate(false); setForm(EMPTY_FORM); setItems([{ Itemtype: '', Locationid: '', Demandmaterial: '', Nominatedqty: '', Quantityunit: '', Scheduleddate: '' }]); setCreateMsg(null); }, 1500);
       } else {
         setCreateMsg({ ok: false, text: `❌ ${result?.message || 'Failed to create nomination'}` });
       }
@@ -285,70 +331,131 @@ export default function NominationEta() {
         }}>
           <div style={{
             background: '#fff', borderRadius: '12px', padding: '1.5rem',
-            width: '480px', maxWidth: '95vw', boxShadow: '0 8px 32px rgba(0,0,0,0.18)',
+            width: '680px', maxWidth: '95vw', maxHeight: '90vh', overflowY: 'auto',
+            boxShadow: '0 8px 32px rgba(0,0,0,0.18)',
           }}>
             <FlexBox direction="Row" style={{ justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
               <Title level="H4">Create Nomination</Title>
               <Button design="Transparent" onClick={() => setShowCreate(false)}>✕</Button>
             </FlexBox>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
-              <div style={{ gridColumn: '1/-1' }}>
-                <Label>Scheduled Date *</Label>
-                <Input type="Date" style={{ width: '100%' }} value={form.Scheduleddate}
-                  onInput={e => setField('Scheduleddate', e.target.value)} />
-              </div>
+            {/* ── Header Section ── */}
+            <div style={{ fontWeight: 600, fontSize: '0.85rem', color: '#0064d9', marginBottom: '0.5rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Header</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', marginBottom: '1rem' }}>
               <div>
-                <Label>Location ID *</Label>
-                <Select style={{ width: '100%' }} onChange={e => setField('Locationid', e.detail.selectedOption.value)}>
+                <Label>Nomination Type *</Label>
+                <Select style={{ width: '100%' }} onChange={e => setField('Nominationtype', e.detail.selectedOption.value)}>
                   <Option value="">-- Select --</Option>
-                  {valueHelps.locations.map(l => (
-                    <Option key={l.Locationid} value={l.Locationid} selected={form.Locationid === l.Locationid}>{l.Locationid}</Option>
+                  {(valueHelps.nominationTypes || []).map(t => (
+                    <Option key={t.Nominationtype} value={t.Nominationtype} selected={form.Nominationtype === t.Nominationtype}>
+                      {t.Nominationtype}{t.Description && t.Description !== t.Nominationtype ? ` — ${t.Description}` : ''}
+                    </Option>
                   ))}
                 </Select>
               </div>
               <div>
                 <Label>Transport System *</Label>
-                <Select style={{ width: '100%' }} onChange={e => setField('Transportsystem', e.detail.selectedOption.value)}>
+                <Select style={{ width: '100%' }} onChange={e => onTransportsystemChange(e.detail.selectedOption.value)}>
                   <Option value="">-- Select --</Option>
                   {valueHelps.transportSystems.map(t => (
                     <Option key={t.Transportsystem} value={t.Transportsystem} selected={form.Transportsystem === t.Transportsystem}>{t.Transportsystem}</Option>
                   ))}
                 </Select>
               </div>
-              <div style={{ gridColumn: '1/-1' }}>
-                <Label>Material *</Label>
-                <Select style={{ width: '100%' }} onChange={e => setField('Demandmaterial', e.detail.selectedOption.value)}>
+              <div>
+                <Label>Mode of Transport</Label>
+                <Select style={{ width: '100%' }} onChange={e => setField('Modeoftransport', e.detail.selectedOption.value)}>
                   <Option value="">-- Select --</Option>
-                  {valueHelps.materials.map(m => (
-                    <Option key={m.Demandmaterial} value={m.Demandmaterial} selected={form.Demandmaterial === m.Demandmaterial}>{m.Demandmaterial}</Option>
+                  {(valueHelps.modesOfTransport || []).map(m => (
+                    <Option key={m.ModeOfTransport} value={m.ModeOfTransport} selected={form.Modeoftransport === m.ModeOfTransport}>
+                      {m.ModeOfTransport}{m.Description ? ` — ${m.Description}` : ''}
+                    </Option>
                   ))}
                 </Select>
               </div>
               <div>
-                <Label>Quantity *</Label>
-                <Input type="Number" placeholder="e.g. 1000" style={{ width: '100%' }} value={form.Nominatedqty}
-                  onInput={e => setField('Nominatedqty', e.target.value)} />
+                <Label>Vehicle Number</Label>
+                <Input style={{ width: '100%' }} value={form.Vehicleid || ''}
+                  onInput={e => setField('Vehicleid', e.target.value)} placeholder="Optional" />
               </div>
               <div>
-                <Label>Unit</Label>
-                <Select style={{ width: '100%' }} onChange={e => setField('Quantityunit', e.detail.selectedOption.value)}>
-                  {(valueHelps.quantityUnits.length ? valueHelps.quantityUnits : [
-                    { Unit: 'BLL', Description: 'Barrels' },
-                    { Unit: 'TNE', Description: 'Tonnes' },
-                  ]).map(u => (
-                    <Option key={u.Unit} value={u.Unit} selected={form.Quantityunit === u.Unit}>{u.Unit} ({u.Description})</Option>
-                  ))}
-                </Select>
+                <Label>Carrier</Label>
+                <Input style={{ width: '100%' }} value={form.Carrier ? `${form.Carrier}${form.CarrierName ? ' — ' + form.CarrierName : ''}` : ''}
+                  readonly placeholder="Auto-populated from Transport System" />
               </div>
               <div>
-                <Label>Item Type</Label>
-                <Select style={{ width: '100%' }} onChange={e => setField('Itemtype', e.detail.selectedOption.value)}>
-                  <Option value="D" selected={form.Itemtype === 'D'}>D (Demand)</Option>
-                  <Option value="O" selected={form.Itemtype === 'O'}>O (Order)</Option>
-                </Select>
+                <Label>Shipper</Label>
+                <Input style={{ width: '100%' }} value={form.Shipper ? `${form.Shipper}${form.ShipperName ? ' — ' + form.ShipperName : ''}` : ''}
+                  readonly placeholder="Auto-populated from Transport System" />
               </div>
             </div>
+
+            {/* ── Items Section ── */}
+            <div style={{ fontWeight: 600, fontSize: '0.85rem', color: '#0064d9', marginBottom: '0.5rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              Nomination Items
+            </div>
+            {items.map((item, idx) => (
+              <div key={idx} style={{ border: '1px solid #e0e0e0', borderRadius: '8px', padding: '0.75rem', marginBottom: '0.75rem', position: 'relative' }}>
+                <div style={{ fontSize: '0.8rem', fontWeight: 600, color: '#555', marginBottom: '0.5rem' }}>Item {idx + 1}</div>
+                {items.length > 1 && (
+                  <Button design="Transparent" style={{ position: 'absolute', top: '0.5rem', right: '0.5rem', fontSize: '0.75rem' }}
+                    onClick={() => removeItem(idx)}>✕ Remove</Button>
+                )}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.5rem' }}>
+                  <div>
+                    <Label>Item Type *</Label>
+                    <Select style={{ width: '100%' }} onChange={e => setItemField(idx, 'Itemtype', e.detail.selectedOption.value)}>
+                      <Option value="">-- Select --</Option>
+                      {(valueHelps.itemTypes || []).map(t => (
+                        <Option key={t.Itemtype} value={t.Itemtype} selected={item.Itemtype === t.Itemtype}>
+                          {t.Itemtype}{t.Description ? ` — ${t.Description}` : ''}
+                        </Option>
+                      ))}
+                    </Select>
+                  </div>
+                  <div>
+                    <Label>Location *</Label>
+                    <Select style={{ width: '100%' }} onChange={e => setItemField(idx, 'Locationid', e.detail.selectedOption.value)}>
+                      <Option value="">-- Select --</Option>
+                      {valueHelps.locations.map(l => (
+                        <Option key={l.Locationid} value={l.Locationid} selected={item.Locationid === l.Locationid}>
+                          {l.Locationid}{l.Description && l.Description !== l.Locationid ? ` — ${l.Description}` : ''}
+                        </Option>
+                      ))}
+                    </Select>
+                  </div>
+                  <div>
+                    <Label>Material *</Label>
+                    <Select style={{ width: '100%' }} onChange={e => setItemField(idx, 'Demandmaterial', e.detail.selectedOption.value)}>
+                      <Option value="">-- Select --</Option>
+                      {valueHelps.materials.map(m => (
+                        <Option key={m.Demandmaterial} value={m.Demandmaterial} selected={item.Demandmaterial === m.Demandmaterial}>{m.Demandmaterial}</Option>
+                      ))}
+                    </Select>
+                  </div>
+                  <div>
+                    <Label>Scheduled Date *</Label>
+                    <Input type="Date" style={{ width: '100%' }} value={item.Scheduleddate}
+                      onInput={e => setItemField(idx, 'Scheduleddate', e.target.value)} />
+                  </div>
+                  <div>
+                    <Label>Quantity *</Label>
+                    <Input type="Number" placeholder="e.g. 1000" style={{ width: '100%' }} value={item.Nominatedqty}
+                      onInput={e => setItemField(idx, 'Nominatedqty', e.target.value)} />
+                  </div>
+                  <div>
+                    <Label>Unit *</Label>
+                    <Select style={{ width: '100%' }} onChange={e => setItemField(idx, 'Quantityunit', e.detail.selectedOption.value)}>
+                      <Option value="">-- Select --</Option>
+                      {valueHelps.quantityUnits.map(u => (
+                        <Option key={u.Unit} value={u.Unit} selected={item.Quantityunit === u.Unit}>{u.Unit} ({u.Description})</Option>
+                      ))}
+                    </Select>
+                  </div>
+                </div>
+              </div>
+            ))}
+            <Button design="Default" onClick={addItem} style={{ marginBottom: '1rem' }}>+ Add Item</Button>
 
             {createMsg && (
               <div style={{
@@ -364,8 +471,8 @@ export default function NominationEta() {
             <FlexBox direction="Row" style={{ gap: '0.5rem', marginTop: '1rem', justifyContent: 'flex-end' }}>
               <Button design="Transparent" onClick={() => setShowCreate(false)} disabled={creating}>Cancel</Button>
               <Button design="Emphasized" onClick={submitCreateNomination} disabled={creating ||
-                !form.Scheduleddate || !form.Locationid || !form.Demandmaterial ||
-                !form.Nominatedqty || !form.Transportsystem}>
+                !form.Nominationtype || !form.Transportsystem ||
+                items.some(it => !it.Itemtype || !it.Locationid || !it.Demandmaterial || !it.Scheduleddate || !it.Nominatedqty || !it.Quantityunit)}>
                 {creating ? 'Creating…' : 'Create Nomination'}
               </Button>
             </FlexBox>

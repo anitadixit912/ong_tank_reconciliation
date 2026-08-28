@@ -486,22 +486,6 @@ async function _sendM6Notifications(runId, runDate, tankCount, okCount, flagCoun
     + `Tanks: ${tankCount} total | GREEN: ${okCount} | AMBER: ${flagCount} | RED: ${urgentCount}\n`
     + `Run ID: ${runId}`;
 
-  const teamsPayload = JSON.stringify({
-    text: summary,
-    title: `Tank Reconciliation — ${runDate}`,
-    themeColor: status === 'RED' ? 'FF0000' : (status === 'AMBER' ? 'FFA500' : '00CC00'),
-    sections: [{
-      activityTitle: `Run ${runDate}`,
-      facts: [
-        { name: 'Status',  value: status },
-        { name: 'Total Tanks', value: String(tankCount) },
-        { name: '🟢 GREEN',   value: String(okCount) },
-        { name: '🟡 AMBER',   value: String(flagCount) },
-        { name: '🔴 RED',     value: String(urgentCount) }
-      ]
-    }]
-  });
-
   // 1. MS Teams / Generic Webhook
   const teamsUrl = process.env.TEAMS_WEBHOOK_URL;
   if (teamsUrl) {
@@ -899,23 +883,150 @@ module.exports = class ReconciliationService extends cds.ApplicationService {
 
     // ── getNominationValueHelps ──────────────────────────────────────────────
     this.on('getNominationValueHelps', async (req) => {
+      let locations = [];
+      let baseUrl = '', headers = { Accept: 'application/json' }, proxyOpts = null;
+
+      try {
+        const cfg = await _resolveDestination(S4HANA_DESTINATION);
+        baseUrl = (cfg.URL || cfg.url || '').replace(/\/$/, '');
+        const authHeader = _basicAuthHeader(cfg);
+        if (authHeader) headers['Authorization'] = authHeader;
+        proxyOpts = cfg._proxyHost ? { host: cfg._proxyHost, port: cfg._proxyPort, token: cfg._proxyToken, locationId: cfg._locationId } : null;
+
+        // Try fetching from ZTANK_DIP_SRV_SRV LocationSet
+        const locRes = await _httpGet(baseUrl + S4_DIP_PATH + '/LocationSet?$format=json&$top=200', headers, proxyOpts);
+        if (locRes.status === 200) {
+          const locData = JSON.parse(locRes.body);
+          locations = (locData.d?.results || []).map(l => ({
+            Locationid:   l.Locationid || l.LOCID || l.Locid || '',
+            Description:  l.Description || l.DESCR || l.Name || l.Locationid || '',
+          })).filter(l => l.Locationid);
+        }
+      } catch(e) {
+        cds.log('s4').warn('LocationSet fetch failed: ' + e.message);
+      }
+
+      // Fallback — derive from existing nominations if LocationSet not available
+      if (!locations.length) {
+        const nominations = await _fetchOpenNominations();
+        locations = [...new Set(nominations.map(n => n.Locationid).filter(Boolean))].sort()
+          .map(v => ({ Locationid: v, Description: v }));
+      }
+
+      // Materials and transport systems from existing nominations
       const nominations = await _fetchOpenNominations();
-      const locations       = [...new Set(nominations.map(n => n.Locationid).filter(Boolean))].sort().map(v => ({ Locationid: v }));
-      const materials       = [...new Set(nominations.map(n => n.Demandmaterial).filter(Boolean))].sort().map(v => ({ Demandmaterial: v }));
+      const materials        = [...new Set(nominations.map(n => n.Demandmaterial).filter(Boolean))].sort().map(v => ({ Demandmaterial: v }));
       const transportSystems = [...new Set(nominations.map(n => n.Transportsystem).filter(Boolean))].sort().map(v => ({ Transportsystem: v }));
-      const quantityUnits   = [
-        { Unit: 'BLL', Description: 'Barrels' },
-        { Unit: 'TNE', Description: 'Tonnes' },
-        { Unit: 'GAL', Description: 'Gallons' },
-        { Unit: 'LTR', Description: 'Litres' },
-        { Unit: 'M3',  Description: 'Cubic Metres' },
-      ];
-      return { locations, materials, transportSystems, quantityUnits };
+
+      // Quantity units from live S/4HANA UoM service
+      let quantityUnits = [];
+      try {
+        const uomRes = await _httpGet(baseUrl + '/sap/opu/odata/sap/TSW_MYNOMINATIONS_SRV_01/I_NominationUoMVH?$format=json&$top=50', headers, proxyOpts);
+        if (uomRes.status === 200) {
+          const uomData = JSON.parse(uomRes.body);
+          quantityUnits = (uomData.d?.results || []).map(u => ({
+            Unit: u.TicketUnitOfMeasure,
+            Description: u.TicketUnitOfMeasureDescription || u.TicketUnitOfMeasure
+          })).filter(u => u.Unit);
+        }
+        cds.log('s4').info('UoM fetch status=' + (quantityUnits.length ? quantityUnits.length + ' units' : 'empty'));
+      } catch(e) {
+        cds.log('s4').warn('UoM fetch failed: ' + e.message);
+      }
+
+      // Nomination types from live S/4HANA
+      let nominationTypes = [];
+      try {
+        const nomTypeRes = await _httpGet(baseUrl + '/sap/opu/odata/sap/TSW_MYNOMINATIONS_SRV_01/I_NominationTypeVH?$format=json&$top=50', headers, proxyOpts);
+        if (nomTypeRes.status === 200) {
+          const nomTypeData = JSON.parse(nomTypeRes.body);
+          nominationTypes = (nomTypeData.d?.results || []).map(t => ({
+            Nominationtype: t.NominationType,
+            Description: t.NominationTypeDescription || t.NominationType
+          })).filter(t => t.Nominationtype);
+        }
+        cds.log('s4').info('NominationType fetch: ' + nominationTypes.length + ' types');
+      } catch(e) {
+        cds.log('s4').warn('NominationType fetch failed: ' + e.message);
+      }
+
+      // Item types from live S/4HANA ZTANK_DIP_SRV_SRV/ItemTypeSet
+      let itemTypes = [];
+      try {
+        const itRes = await _httpGet(baseUrl + S4_DIP_PATH + '/ItemTypeSet?$format=json&$top=100', headers, proxyOpts);
+        cds.log('s4').info('ItemType fetch status=' + itRes.status + ' count=' + (itRes.status === 200 ? JSON.parse(itRes.body).d?.results?.length : 0));
+        if (itRes.status === 200) {
+          const itData = JSON.parse(itRes.body);
+          itemTypes = (itData.d?.results || []).map(t => ({
+            Itemtype: t.Sityp, Description: t.Sityp
+          })).filter(t => t.Itemtype);
+        }
+      } catch(e) {
+        cds.log('s4').warn('ItemType fetch failed: ' + e.message);
+      }
+
+      // Modes of transport from live S/4HANA
+      let modesOfTransport = [];
+      try {
+        const motRes = await _httpGet(baseUrl + '/sap/opu/odata/sap/TSW_MYNOMINATIONS_SRV_01/I_NominationModeOfTranspVH?$format=json&$top=50', headers, proxyOpts);
+        if (motRes.status === 200) {
+          const motData = JSON.parse(motRes.body);
+          modesOfTransport = (motData.d?.results || []).map(m => ({
+            ModeOfTransport: m.ModeOfTransport, Description: m.ModeOfTransportDesc || m.ModeOfTransport
+          })).filter(m => m.ModeOfTransport);
+        }
+      } catch(e) {
+        cds.log('s4').warn('ModeOfTransport fetch failed: ' + e.message);
+      }
+
+      return { locations, materials, transportSystems, quantityUnits, nominationTypes, itemTypes, modesOfTransport };
+    });
+
+    // ── getCarrierShipperByTS ────────────────────────────────────────────────
+    this.on('getCarrierShipperByTS', async (req) => {
+      const { Transportsystem } = req.data;
+      try {
+        const cfg     = await _resolveDestination(S4HANA_DESTINATION);
+        const baseUrl = (cfg.URL || cfg.url || '').replace(/\/$/, '');
+        const authHeader = _basicAuthHeader(cfg);
+        const headers = { Accept: 'application/json' };
+        if (authHeader) headers['Authorization'] = authHeader;
+        const proxyOpts = cfg._proxyHost ? { host: cfg._proxyHost, port: cfg._proxyPort, token: cfg._proxyToken, locationId: cfg._locationId } : null;
+
+        // Fetch a recent nomination for this transport system to get carrier/shipper
+        const filter = encodeURIComponent(`TransportSystem eq '${Transportsystem}'`);
+        const path = '/sap/opu/odata/sap/TSW_MYNOMINATIONS_SRV_01/I_NominationHeaderFld'
+          + `?$filter=${filter}&$select=NominationCarrier,NominationShipper&$top=1&$format=json`;
+        const res = await _httpGet(baseUrl + path, headers, proxyOpts);
+        if (res.status === 200) {
+          const data = JSON.parse(res.body);
+          const rec  = (data.d?.results || [])[0] || {};
+
+          // Get carrier name
+          let carrierName = '', shipperName = '';
+          if (rec.NominationCarrier) {
+            try {
+              const cRes = await _httpGet(baseUrl + `/sap/opu/odata/sap/TSW_MYNOMINATIONS_SRV_01/I_TicketCarrierVH('${rec.NominationCarrier}')?$format=json`, headers, proxyOpts);
+              if (cRes.status === 200) carrierName = JSON.parse(cRes.body).d?.CarrierName || '';
+            } catch(_) {}
+          }
+          if (rec.NominationShipper) {
+            try {
+              const sRes = await _httpGet(baseUrl + `/sap/opu/odata/sap/TSW_MYNOMINATIONS_SRV_01/I_TicketShipperVH('${rec.NominationShipper}')?$format=json`, headers, proxyOpts);
+              if (sRes.status === 200) shipperName = JSON.parse(sRes.body).d?.ShipperName || '';
+            } catch(_) {}
+          }
+          return { Carrier: rec.NominationCarrier || '', CarrierName: carrierName, Shipper: rec.NominationShipper || '', ShipperName: shipperName };
+        }
+      } catch(e) {
+        cds.log('s4').warn('getCarrierShipperByTS failed: ' + e.message);
+      }
+      return { Carrier: '', CarrierName: '', Shipper: '', ShipperName: '' };
     });
 
     // ── createNomination ─────────────────────────────────────────────────────
     this.on('createNomination', async (req) => {
-      const { Scheduleddate, Locationid, Demandmaterial, Nominatedqty, Quantityunit, Transportsystem, Itemtype } = req.data;
+      const { Nominationtype, Transportsystem, Modeoftransport, Vehicleid, Carrier, Shipper, Items } = req.data;
       try {
         const cfg     = await _resolveDestination(S4HANA_DESTINATION);
         const baseUrl = (cfg.URL || cfg.url || '').replace(/\/$/, '');
@@ -924,51 +1035,79 @@ module.exports = class ReconciliationService extends cds.ApplicationService {
         const authHeader = _basicAuthHeader(cfg);
         const proxyOpts  = cfg._proxyHost ? { host: cfg._proxyHost, port: cfg._proxyPort, token: cfg._proxyToken, locationId: cfg._locationId } : null;
 
-        // Step 1: Fetch CSRF token
-        const tokenHeaders = { Accept: 'application/json', 'x-csrf-token': 'Fetch' };
-        if (authHeader) tokenHeaders['Authorization'] = authHeader;
-        const tokenRes = await _httpGet(baseUrl + S4_DIP_PATH + '/NominationSet?$top=1&$format=json', tokenHeaders, proxyOpts);
-        const csrfToken    = (tokenRes.headers && (tokenRes.headers['x-csrf-token'] || tokenRes.headers['X-CSRF-Token'])) || null;
-        const sessionCookie = (tokenRes.headers && (tokenRes.headers['set-cookie'] || tokenRes.headers['Set-Cookie'])) || null;
+        // Parse items JSON
+        let items = [];
+        try { items = JSON.parse(Items || '[]'); } catch(_) {}
+        if (!items.length) return { success: false, message: 'At least one nomination item is required' };
 
-        // Step 2: POST new nomination
-        const body = JSON.stringify({
-          Nominationnumber: '00000000000000000000', // S4 will assign
-          Itemnumber:       '0000000010',
-          Itemtype:         Itemtype || 'D',
-          Itemstatus:       '1',
-          Nomstatus:        '1',
-          Scheduleddate,
-          Locationid,
-          Demandmaterial,
-          Nominatedqty:     String(Nominatedqty),
-          Quantityunit,
-          Transportsystem,
-        });
+        // Build NOMINATIONITEM_IN XML
+        const itemsXml = items.map((item, idx) => {
+          const itemNo    = String((idx + 1) * 10).padStart(10, '0');
+          const dateFormatted = (item.Scheduleddate || '').replace(/-/g, '');
+          return `<item>
+          <ITEMNUMBER>${itemNo}</ITEMNUMBER>
+          <ITEMTYPE>${item.Itemtype || 'D'}</ITEMTYPE>
+          <ITEMSTATUS>1</ITEMSTATUS>
+          <SCHEDULEDDATE>${dateFormatted}</SCHEDULEDDATE>
+          <LOCATIONID>${item.Locationid || ''}</LOCATIONID>
+          <DEMANDMATERIAL>${item.Demandmaterial || ''}</DEMANDMATERIAL>
+          <NOMINATEDQUANTITY>${parseFloat(item.Nominatedqty) || 0}</NOMINATEDQUANTITY>
+          <QUANTITYUNIT_SAP>${item.Quantityunit || ''}</QUANTITYUNIT_SAP>
+        </item>`;
+        }).join('\n');
 
-        const postHeaders = { 'Content-Type': 'application/json', Accept: 'application/json' };
-        if (authHeader)   postHeaders['Authorization'] = authHeader;
-        if (csrfToken)    postHeaders['x-csrf-token']  = csrfToken;
-        if (sessionCookie) postHeaders['Cookie']       = Array.isArray(sessionCookie) ? sessionCookie.join('; ') : sessionCookie;
+        const sapClient = cfg['sap-client'] || cfg.SapClient || cfg.sapClient
+          || (cfg.URL || cfg.url || '').match(/sap-client=(\d+)/)?.[1]
+          || new URL(baseUrl).searchParams?.get('sap-client')
+          || '';
+        const clientParam = sapClient ? '&sap-client=' + sapClient : '';
+        const soapUrl = baseUrl + '/sap/bc/soap/rfc?services=RFC_TSW_NOM_CREATEFROMDATA' + clientParam;
 
-        const postRes = await _httpPost(baseUrl + S4_DIP_PATH + '/NominationSet', body, postHeaders, proxyOpts);
+        const soapBody = `<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:urn="urn:sap-com:document:sap:rfc:functions">
+  <soapenv:Header/>
+  <soapenv:Body>
+    <urn:RFC_TSW_NOM_CREATEFROMDATA>
+      <HEADERDATA_IN>
+        <TRANSPORTSYSTEM>${Transportsystem || ''}</TRANSPORTSYSTEM>
+        <NOMINATIONTYPE>${Nominationtype || ''}</NOMINATIONTYPE>
+        <MODOFTRANSPORT>${Modeoftransport || ''}</MODOFTRANSPORT>
+        <VEHICLEID>${Vehicleid || ''}</VEHICLEID>
+        <CARRIER>${Carrier || ''}</CARRIER>
+        <SHIPPER>${Shipper || ''}</SHIPPER>
+      </HEADERDATA_IN>
+      <NOMINATIONITEM_IN>
+        ${itemsXml}
+      </NOMINATIONITEM_IN>
+    </urn:RFC_TSW_NOM_CREATEFROMDATA>
+  </soapenv:Body>
+</soapenv:Envelope>`;
 
-        if (postRes.status === 201 || postRes.status === 200) {
-          let created = {};
-          try { created = JSON.parse(postRes.body).d || {}; } catch(_) {}
-          return {
-            success: true,
-            Nominationnumber: created.Nominationnumber || '',
-            Itemnumber:       created.Itemnumber || '0000000010',
-            message: `Nomination ${created.Nominationnumber || ''} created successfully in S/4HANA OGS.`,
-          };
+        const soapHeaders = { 'Content-Type': 'text/xml; charset=utf-8', 'SOAPAction': 'RFC_TSW_NOM_CREATEFROMDATA' };
+        if (authHeader) soapHeaders['Authorization'] = authHeader;
+
+        cds.log('s4').info('createNomination: calling RFC via SOAP');
+        const soapRes = await _httpPost(soapUrl, soapBody, soapHeaders, proxyOpts);
+        cds.log('s4').info('createNomination: SOAP status=' + soapRes.status + ' body=' + soapRes.body.slice(0, 800));
+
+        if (soapRes.status === 200) {
+          const nomExtMatch = soapRes.body.match(/<NOMINATIONNUMBER_EXT[^>]*>([^<]+)<\/NOMINATIONNUMBER_EXT>/i);
+          const nomSapMatch = soapRes.body.match(/<NOMINATIONNUMBER_SAP[^>]*>([^<]+)<\/NOMINATIONNUMBER_SAP>/i);
+          const nomNumber   = (nomExtMatch ? nomExtMatch[1].trim() : '') || (nomSapMatch ? nomSapMatch[1].trim() : '');
+          // Check all TYPE tags in RETURN table for errors
+          const typeMatches = [...soapRes.body.matchAll(/<TYPE[^>]*>([^<]+)<\/TYPE>/gi)];
+          const hasError    = typeMatches.some(m => m[1] === 'E' || m[1] === 'A');
+          const errorMatch  = soapRes.body.match(/<MESSAGE[^>]*>([^<]+)<\/MESSAGE>/i);
+          if (hasError) {
+            return { success: false, Nominationnumber: '', message: errorMatch ? errorMatch[1] : 'RFC returned error' };
+          }
+          return { success: true, Nominationnumber: nomNumber, message: `Nomination ${nomNumber} created successfully.` };
         } else {
-          let errMsg = postRes.body?.slice(0, 300) || 'Unknown error';
-          try { errMsg = JSON.parse(postRes.body)?.error?.message?.value || errMsg; } catch(_) {}
-          return { success: false, Nominationnumber: '', Itemnumber: '', message: `S/4HANA error (${postRes.status}): ${errMsg}` };
+          const faultMatch = soapRes.body.match(/<faultstring[^>]*>([^<]+)<\/faultstring>/i);
+          return { success: false, Nominationnumber: '', message: faultMatch ? faultMatch[1] : 'SOAP HTTP ' + soapRes.status };
         }
       } catch (e) {
-        return { success: false, Nominationnumber: '', Itemnumber: '', message: `Error creating nomination: ${e.message}` };
+        return { success: false, Nominationnumber: '', message: `Error: ${e.message}` };
       }
     });
 
