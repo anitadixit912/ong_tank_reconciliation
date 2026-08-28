@@ -216,18 +216,32 @@ async function _fetchOpenNominations() {
     if (!baseUrl) return [];
 
     const authHeader = _basicAuthHeader(cfg);
-    const path = '/sap/opu/odata/sap/ZTANK_DIP_SRV_SRV/NominationSet?$format=json';
     const headers = { Accept: 'application/json' };
     if (authHeader) headers['Authorization'] = authHeader;
-
     const proxyOpts = cfg._proxyHost ? { host: cfg._proxyHost, port: cfg._proxyPort, token: cfg._proxyToken, locationId: cfg._locationId } : null;
+
+    const path = '/sap/opu/odata/sap/TSW_MYNOMINATIONS_SRV_01/I_NominationHeaderFld?$format=json&$top=200';
     const res = await _httpGet(baseUrl + path, headers, proxyOpts);
     if (res.status !== 200) {
-      cds.log('s4').warn('NominationSet returned ' + res.status);
+      cds.log('s4').warn('I_NominationHeaderFld returned ' + res.status);
       return [];
     }
     const payload = JSON.parse(res.body);
-    return (payload.d && payload.d.results) ? payload.d.results : [];
+    const results = (payload.d && payload.d.results) ? payload.d.results : [];
+    // Map TSW_MYNOMINATIONS_SRV_01 field names to the shape the rest of the code expects
+    return results.map(n => ({
+      Nominationnumber: n.NominationNumber      || n.Nominationnumber || '',
+      Itemnumber:       n.NominationItem        || n.Itemnumber       || '',
+      Itemstatus:       n.NominationItemStatus  || n.Itemstatus       || '',
+      Itemtype:         n.NominationItemType    || n.Itemtype         || '',
+      Scheduleddate:    n.NominationDate        || n.Scheduleddate    || '',
+      Locationid:       n.NominationLocation    || n.Locationid       || '',
+      Demandmaterial:   n.NominationMaterial    || n.Demandmaterial   || '',
+      Nominatedqty:     n.NominationQuantity    || n.Nominatedqty     || '',
+      Quantityunit:     n.NominationQuantityUnit|| n.Quantityunit     || '',
+      Nomstatus:        n.NominationStatus      || n.Nomstatus        || '',
+      Transportsystem:  n.TransportSystem       || n.Transportsystem  || '',
+    }));
   } catch (err) {
     cds.log('s4').warn('Failed to fetch nominations: ' + err.message);
     return [];
@@ -950,15 +964,16 @@ module.exports = class ReconciliationService extends cds.ApplicationService {
         cds.log('s4').warn('NominationType fetch failed: ' + e.message);
       }
 
-      // Item types from live S/4HANA ZTANK_DIP_SRV_SRV/ItemTypeSet
+      // Item types from live S/4HANA TSW_MYNOMINATIONS_SRV_01
       let itemTypes = [];
       try {
-        const itRes = await _httpGet(baseUrl + S4_DIP_PATH + '/ItemTypeSet?$format=json&$top=100', headers, proxyOpts);
+        const itRes = await _httpGet(baseUrl + '/sap/opu/odata/sap/TSW_MYNOMINATIONS_SRV_01/I_NominationItemTypeVH?$format=json&$top=100', headers, proxyOpts);
         cds.log('s4').info('ItemType fetch status=' + itRes.status + ' count=' + (itRes.status === 200 ? JSON.parse(itRes.body).d?.results?.length : 0));
         if (itRes.status === 200) {
           const itData = JSON.parse(itRes.body);
           itemTypes = (itData.d?.results || []).map(t => ({
-            Itemtype: t.Sityp, Description: t.Sityp
+            Itemtype: t.NominationItemType || t.ItemType || t.Itemtype,
+            Description: t.NominationItemTypeDesc || t.ItemTypeDescription || t.NominationItemType || t.ItemType || t.Itemtype
           })).filter(t => t.Itemtype);
         }
       } catch(e) {
