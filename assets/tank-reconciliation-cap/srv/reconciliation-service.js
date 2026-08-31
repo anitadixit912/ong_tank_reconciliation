@@ -220,7 +220,7 @@ async function _fetchOpenNominations() {
     if (authHeader) headers['Authorization'] = authHeader;
     const proxyOpts = cfg._proxyHost ? { host: cfg._proxyHost, port: cfg._proxyPort, token: cfg._proxyToken, locationId: cfg._locationId } : null;
 
-    const path = '/sap/opu/odata/sap/TSW_MYNOMINATIONS_SRV_01/C_Oij06_MyNominations?$format=json&$top=200';
+    const path = '/sap/opu/odata/sap/TSW_MYNOMINATIONS_SRV_01/C_Oij06_MyNominations?$format=json&$orderby=NominationDoc%20desc&$top=500';
     const res = await _httpGet(baseUrl + path, headers, proxyOpts);
     if (res.status !== 200) {
       cds.log('s4').warn('C_Oij06_MyNominations returned ' + res.status);
