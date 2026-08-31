@@ -220,7 +220,8 @@ async function _fetchOpenNominations() {
     if (authHeader) headers['Authorization'] = authHeader;
     const proxyOpts = cfg._proxyHost ? { host: cfg._proxyHost, port: cfg._proxyPort, token: cfg._proxyToken, locationId: cfg._locationId } : null;
 
-    const path = '/sap/opu/odata/sap/TSW_MYNOMINATIONS_SRV_01/C_Oij06_MyNominations?$format=json&$orderby=NominationDoc%20desc&$top=500';
+    const path = '/sap/opu/odata/sap/TSW_MYNOMINATIONS_SRV_01/C_Oij06_MyNominations?$format=json&$orderby=NominationDoc%20desc&$top=500' + _sapClientParam(cfg);
+    cds.log('s4').info('_fetchOpenNominations: sap-client param=' + (_sapClientParam(cfg) || 'NONE'));
     const res = await _httpGet(baseUrl + path, headers, proxyOpts);
     if (res.status !== 200) {
       cds.log('s4').warn('C_Oij06_MyNominations returned ' + res.status);
@@ -264,6 +265,13 @@ async function _fetchOpenNominations() {
     cds.log('s4').warn('Failed to fetch nominations: ' + err.message);
     return [];
   }
+}
+
+/** Extract sap-client from destination config or URL. */
+function _sapClientParam(cfg) {
+  const client = cfg['sap-client'] || cfg.SapClient || cfg.sapClient
+    || (cfg.URL || cfg.url || '').match(/sap-client=(\d+)/)?.[1] || '';
+  return client ? '&sap-client=' + client : '';
 }
 
 /** Build a Basic Authorization header value from destination config (BasicAuthentication). */
@@ -915,7 +923,7 @@ module.exports = class ReconciliationService extends cds.ApplicationService {
 
     // ── getNominationValueHelps ──────────────────────────────────────────────
     this.on('getNominationValueHelps', async (req) => {
-      let baseUrl = '', headers = { Accept: 'application/json' }, proxyOpts = null;
+      let baseUrl = '', headers = { Accept: 'application/json' }, proxyOpts = null, sapClientParam = '';
       const BASE = '/sap/opu/odata/sap/TSW_MYNOMINATIONS_SRV_01';
 
       try {
@@ -924,13 +932,14 @@ module.exports = class ReconciliationService extends cds.ApplicationService {
         const authHeader = _basicAuthHeader(cfg);
         if (authHeader) headers['Authorization'] = authHeader;
         proxyOpts = cfg._proxyHost ? { host: cfg._proxyHost, port: cfg._proxyPort, token: cfg._proxyToken, locationId: cfg._locationId } : null;
+        sapClientParam = _sapClientParam(cfg);
       } catch(e) {
         cds.log('s4').warn('Destination resolve failed: ' + e.message);
       }
 
       const _vhFetch = async (entity, map) => {
         try {
-          const r = await _httpGet(baseUrl + BASE + '/' + entity + '?$format=json&$top=200', headers, proxyOpts);
+          const r = await _httpGet(baseUrl + BASE + '/' + entity + '?$format=json&$top=200' + sapClientParam, headers, proxyOpts);
           if (r.status === 200) {
             const rows = JSON.parse(r.body).d?.results || [];
             if (rows.length && entity === 'SITYPSet') cds.log('s4').info('SITYPSet keys: ' + Object.keys(rows[0]).filter(k => k !== '__metadata').join(', '));
@@ -966,11 +975,12 @@ module.exports = class ReconciliationService extends cds.ApplicationService {
         const headers = { Accept: 'application/json' };
         if (authHeader) headers['Authorization'] = authHeader;
         const proxyOpts = cfg._proxyHost ? { host: cfg._proxyHost, port: cfg._proxyPort, token: cfg._proxyToken, locationId: cfg._locationId } : null;
+        const cp = _sapClientParam(cfg);
 
         // Fetch a recent nomination for this transport system to get carrier/shipper
         const filter = encodeURIComponent(`TransportSystem eq '${Transportsystem}'`);
         const path = '/sap/opu/odata/sap/TSW_MYNOMINATIONS_SRV_01/I_NominationHeaderFld'
-          + `?$filter=${filter}&$select=NominationCarrier,NominationShipper&$top=1&$format=json`;
+          + `?$filter=${filter}&$select=NominationCarrier,NominationShipper&$top=1&$format=json` + cp;
         const res = await _httpGet(baseUrl + path, headers, proxyOpts);
         if (res.status === 200) {
           const data = JSON.parse(res.body);
@@ -980,13 +990,13 @@ module.exports = class ReconciliationService extends cds.ApplicationService {
           let carrierName = '', shipperName = '';
           if (rec.NominationCarrier) {
             try {
-              const cRes = await _httpGet(baseUrl + `/sap/opu/odata/sap/TSW_MYNOMINATIONS_SRV_01/I_TicketCarrierVH('${rec.NominationCarrier}')?$format=json`, headers, proxyOpts);
+              const cRes = await _httpGet(baseUrl + `/sap/opu/odata/sap/TSW_MYNOMINATIONS_SRV_01/I_TicketCarrierVH('${rec.NominationCarrier}')?$format=json` + cp, headers, proxyOpts);
               if (cRes.status === 200) carrierName = JSON.parse(cRes.body).d?.CarrierName || '';
             } catch(_) {}
           }
           if (rec.NominationShipper) {
             try {
-              const sRes = await _httpGet(baseUrl + `/sap/opu/odata/sap/TSW_MYNOMINATIONS_SRV_01/I_TicketShipperVH('${rec.NominationShipper}')?$format=json`, headers, proxyOpts);
+              const sRes = await _httpGet(baseUrl + `/sap/opu/odata/sap/TSW_MYNOMINATIONS_SRV_01/I_TicketShipperVH('${rec.NominationShipper}')?$format=json` + cp, headers, proxyOpts);
               if (sRes.status === 200) shipperName = JSON.parse(sRes.body).d?.ShipperName || '';
             } catch(_) {}
           }
