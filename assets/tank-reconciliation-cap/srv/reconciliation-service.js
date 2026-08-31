@@ -1099,13 +1099,39 @@ module.exports = class ReconciliationService extends cds.ApplicationService {
           const hasError    = typeMatches.some(m => m[1] === 'E' || m[1] === 'A');
           const errorMatch  = soapRes.body.match(/<MESSAGE[^>]*>([^<]+)<\/MESSAGE>/i);
           if (hasError) {
+            // Rollback on error
+            const rollbackBody = `<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:urn="urn:sap-com:document:sap:rfc:functions">
+  <soapenv:Header/><soapenv:Body><urn:BAPI_TRANSACTION_ROLLBACK/></soapenv:Body>
+</soapenv:Envelope>`;
+            const rollbackUrl = baseUrl + '/sap/bc/soap/rfc?services=BAPI_TRANSACTION_ROLLBACK' + clientParam;
+            try { await _httpPost(rollbackUrl, rollbackBody, { ...soapHeaders, 'SOAPAction': 'BAPI_TRANSACTION_ROLLBACK' }, proxyOpts); } catch(_) {}
             return { success: false, Nominationnumber: '', message: errorMatch ? errorMatch[1] : 'RFC returned error' };
           }
 
-          // S/4HANA commits the nomination asynchronously — the number is not immediately
-          // available in C_Oij06_MyNominations. Return success and let the user refresh the list.
-          cds.log('s4').info('createNomination: RFC succeeded — nomination committed asynchronously');
-          return { success: true, Nominationnumber: '', message: 'Nomination created successfully. Refresh the nominations list in a few seconds to see it.' };
+          // Extract nomination number from SOAP response
+          const nomSapMatch = soapRes.body.match(/<NOMINATIONNUMBER_SAP[^>]*>([^<$][^<]*)<\/NOMINATIONNUMBER_SAP>/i);
+          const nomExtMatch = soapRes.body.match(/<NOMINATIONNUMBER_EXT[^>]*>([^<]+)<\/NOMINATIONNUMBER_EXT>/i);
+          const nomNumber   = (nomSapMatch ? nomSapMatch[1].trim() : '') || (nomExtMatch ? nomExtMatch[1].trim() : '');
+          const nomDisplay  = nomNumber ? nomNumber.replace(/^0+/, '') : '';
+
+          // Commit the transaction — RFC does not auto-commit (SAP BAPI pattern)
+          const commitBody = `<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:urn="urn:sap-com:document:sap:rfc:functions">
+  <soapenv:Header/><soapenv:Body>
+    <urn:BAPI_TRANSACTION_COMMIT><WAIT>X</WAIT></urn:BAPI_TRANSACTION_COMMIT>
+  </soapenv:Body>
+</soapenv:Envelope>`;
+          const commitUrl = baseUrl + '/sap/bc/soap/rfc?services=BAPI_TRANSACTION_COMMIT' + clientParam;
+          try {
+            const commitRes = await _httpPost(commitUrl, commitBody, { ...soapHeaders, 'SOAPAction': 'BAPI_TRANSACTION_COMMIT' }, proxyOpts);
+            cds.log('s4').info('createNomination: COMMIT status=' + commitRes.status);
+          } catch (commitErr) {
+            cds.log('s4').warn('createNomination: COMMIT failed: ' + commitErr.message);
+          }
+
+          cds.log('s4').info('createNomination: committed — nom=' + nomDisplay);
+          return { success: true, Nominationnumber: nomDisplay, message: `Nomination ${nomDisplay} created and committed successfully.` };
         } else {
           const faultMatch = soapRes.body.match(/<faultstring[^>]*>([^<]+)<\/faultstring>/i);
           return { success: false, Nominationnumber: '', message: faultMatch ? faultMatch[1] : 'SOAP HTTP ' + soapRes.status };

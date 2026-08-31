@@ -428,15 +428,17 @@ export default function NominationEta() {
       const data = await res.json();
       const result = data?.value || data;
       if (result?.success) {
+        const nomNum = result.Nominationnumber || '';
         const itemLines = items.map((it, idx) =>
           `  - **Item ${idx + 1}:** ${it.Demandmaterial || '–'} | Qty: ${parseFloat(it.Nominatedqty || 0).toLocaleString()} ${it.Quantityunit || ''} | Location: ${it.Locationid || '–'} | Date: ${it.Scheduleddate || '–'} | Type: ${it.Itemtype || '–'}`
         ).join('\n');
-        setCreateMsg({ ok: true, text: `✅ Nomination created successfully! Refresh the list in a few seconds to see it.` });
+        setCreateMsg({ ok: true, text: `✅ Nomination ${nomNum ? '#' + nomNum : ''} created successfully!` });
         setMessages(prev => [...prev, {
           role: 'assistant',
           text: [
             `✅ **Nomination Created Successfully**`,
             ``,
+            nomNum ? `- **Nomination #:** ${nomNum}` : `- **Nomination #:** Pending (refresh list in a few seconds)`,
             `- **Transport System:** ${form.Transportsystem}`,
             `- **Nomination Type:** ${form.Nominationtype}`,
             `- **Mode of Transport:** ${form.Modeoftransport || '–'}`,
@@ -446,7 +448,7 @@ export default function NominationEta() {
             `- **Items (${items.length}):**`,
             itemLines,
             ``,
-            `> ℹ️ S/4HANA assigns the nomination number asynchronously. Click **"Open Nominations"** and hit **Refresh** after a few seconds to see the new nomination and its number.`,
+            nomNum ? `Would you like me to propose an ETA for nomination **${nomNum}**?` : `> ℹ️ Click **"Open Nominations"** and hit **Refresh** to see the new nomination.`,
           ].join('\n'),
         }]);
         setTimeout(() => { setShowCreate(false); setForm(EMPTY_FORM); setItems([{ Itemtype: '', Locationid: '', Demandmaterial: '', Nominatedqty: '', Quantityunit: '', Scheduleddate: '', Documentindicator: 'X' }]); setCreateMsg(null); }, 1500);
