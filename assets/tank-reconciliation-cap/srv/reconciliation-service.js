@@ -1057,6 +1057,27 @@ module.exports = class ReconciliationService extends cds.ApplicationService {
   </soapenv:Body>
 </soapenv:Envelope>`;
 
+        const nomListPath = '/sap/opu/odata/sap/TSW_MYNOMINATIONS_SRV_01/C_Oij06_MyNominations'
+          + '?$orderby=NominationDoc%20desc&$top=1&$format=json';
+        const nomListHeaders = { Accept: 'application/json' };
+        if (authHeader) nomListHeaders['Authorization'] = authHeader;
+
+        // Snapshot the current highest nomination number BEFORE creating
+        let baselineNomNumber = 0;
+        try {
+          const baselineRes = await _httpGet(baseUrl + nomListPath, nomListHeaders, proxyOpts);
+          if (baselineRes.status === 200) {
+            const baselineData = JSON.parse(baselineRes.body);
+            const baselineTop  = (baselineData.d?.results || [])[0];
+            if (baselineTop && baselineTop.NominationDoc) {
+              baselineNomNumber = parseInt(baselineTop.NominationDoc.replace(/\D/g, ''), 10) || 0;
+            }
+          }
+          cds.log('s4').info('createNomination: baseline nom number=' + baselineNomNumber);
+        } catch (e) {
+          cds.log('s4').warn('createNomination: baseline fetch failed: ' + e.message);
+        }
+
         const soapHeaders = { 'Content-Type': 'text/xml; charset=utf-8', 'SOAPAction': 'RFC_TSW_NOM_CREATEFROMDATA' };
         if (authHeader) soapHeaders['Authorization'] = authHeader;
 
@@ -1088,29 +1109,27 @@ module.exports = class ReconciliationService extends cds.ApplicationService {
             return { success: false, Nominationnumber: '', message: errorMatch ? errorMatch[1] : 'RFC returned error' };
           }
 
-          // S/4HANA returns $0000000000000000001 as a placeholder — the real number is committed
-          // asynchronously. Retry up to 5 times (max ~15s) until a real number appears.
+          // S/4HANA always returns $0000000000000000001 as placeholder.
+          // Poll until a nomination number HIGHER than our baseline appears — that's the new one.
           let realNomNumber = '';
-          const fetchHeaders = { Accept: 'application/json' };
-          if (authHeader) fetchHeaders['Authorization'] = authHeader;
-          // Fetch the highest nomination number overall — no filter, just top=1 descending
-          const nomPath = '/sap/opu/odata/sap/TSW_MYNOMINATIONS_SRV_01/C_Oij06_MyNominations'
-            + '?$orderby=NominationDoc%20desc&$top=1&$format=json';
           for (let attempt = 1; attempt <= 5; attempt++) {
             await new Promise(resolve => setTimeout(resolve, 3000));
             try {
-              const nomRes = await _httpGet(baseUrl + nomPath, fetchHeaders, proxyOpts);
+              const nomRes = await _httpGet(baseUrl + nomListPath, nomListHeaders, proxyOpts);
               cds.log('s4').info('createNomination: fetch attempt ' + attempt + ' status=' + nomRes.status + ' body=' + nomRes.body.slice(0, 300));
               if (nomRes.status === 200) {
-                const nomData = JSON.parse(nomRes.body);
-                const latest  = (nomData.d?.results || [])[0];
+                const nomData  = JSON.parse(nomRes.body);
+                const latest   = (nomData.d?.results || [])[0];
                 if (latest && latest.NominationDoc && !latest.NominationDoc.startsWith('$')) {
-                  realNomNumber = latest.NominationDoc;
-                  cds.log('s4').info('createNomination: resolved real nom number=' + realNomNumber + ' on attempt ' + attempt);
-                  break;
+                  const latestNum = parseInt(latest.NominationDoc.replace(/\D/g, ''), 10) || 0;
+                  if (latestNum > baselineNomNumber) {
+                    realNomNumber = latest.NominationDoc;
+                    cds.log('s4').info('createNomination: new nom=' + realNomNumber + ' (baseline=' + baselineNomNumber + ') on attempt ' + attempt);
+                    break;
+                  }
                 }
               }
-              cds.log('s4').info('createNomination: nom number not ready yet, attempt ' + attempt);
+              cds.log('s4').info('createNomination: new nom not committed yet, attempt ' + attempt);
             } catch (fetchErr) {
               cds.log('s4').warn('createNomination: fetch attempt ' + attempt + ' failed: ' + fetchErr.message);
             }
