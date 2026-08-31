@@ -298,7 +298,7 @@ export default function NominationEta() {
   const [contextId, setContextId]   = useState(null);
   const [showCreate, setShowCreate] = useState(false);
   const [form, setForm]             = useState(EMPTY_FORM);
-  const [items, setItems]           = useState([{ Itemtype: '', Locationid: '', Demandmaterial: '', Nominatedqty: '', Quantityunit: '', Scheduleddate: '' }]);
+  const [items, setItems]           = useState([{ Itemtype: '', Locationid: '', Demandmaterial: '', Nominatedqty: '', Quantityunit: '', Scheduleddate: '', Documentindicator: 'X' }]);
   const [creating, setCreating]     = useState(false);
   const [createMsg, setCreateMsg]   = useState(null);
   const [valueHelps, setValueHelps] = useState({ locations: [], materials: [], transportSystems: [], quantityUnits: [], nominationTypes: [], itemTypes: [], modesOfTransport: [] });
@@ -340,7 +340,7 @@ export default function NominationEta() {
     } catch(_) {}
   };
 
-  const addItem    = () => setItems(prev => [...prev, { Itemtype: '', Locationid: '', Demandmaterial: '', Nominatedqty: '', Quantityunit: '', Scheduleddate: '' }]);
+  const addItem    = () => setItems(prev => [...prev, { Itemtype: '', Locationid: '', Demandmaterial: '', Nominatedqty: '', Quantityunit: '', Scheduleddate: '', Documentindicator: 'X' }]);
   const removeItem = (idx) => setItems(prev => prev.filter((_, i) => i !== idx));
   const setItemField = (idx, field, value) => setItems(prev => prev.map((it, i) => i === idx ? { ...it, [field]: value } : it));
 
@@ -449,7 +449,7 @@ export default function NominationEta() {
             `> ℹ️ S/4HANA assigns the nomination number asynchronously. Click **"Open Nominations"** and hit **Refresh** after a few seconds to see the new nomination and its number.`,
           ].join('\n'),
         }]);
-        setTimeout(() => { setShowCreate(false); setForm(EMPTY_FORM); setItems([{ Itemtype: '', Locationid: '', Demandmaterial: '', Nominatedqty: '', Quantityunit: '', Scheduleddate: '' }]); setCreateMsg(null); }, 1500);
+        setTimeout(() => { setShowCreate(false); setForm(EMPTY_FORM); setItems([{ Itemtype: '', Locationid: '', Demandmaterial: '', Nominatedqty: '', Quantityunit: '', Scheduleddate: '', Documentindicator: 'X' }]); setCreateMsg(null); }, 1500);
         // Auto-refresh nominations list after 10s to catch S/4HANA async commit
         setTimeout(() => refreshNominations(), 10000);
       } else {
@@ -581,6 +581,15 @@ export default function NominationEta() {
                           {t.Itemtype}{t.Description ? ` — ${t.Description}` : ''}
                         </Option>
                       ))}
+                    </Select>
+                  </div>
+                  <div>
+                    <Label>Document Indicator *</Label>
+                    <Select style={{ width: '100%' }} onChange={e => setItemField(idx, 'Documentindicator', e.detail.selectedOption.value)}>
+                      <Option value="X" selected={item.Documentindicator === 'X'}>X — No Reference Document</Option>
+                      <Option value="P" selected={item.Documentindicator === 'P'}>P — Purchase Order</Option>
+                      <Option value="S" selected={item.Documentindicator === 'S'}>S — Sales Order</Option>
+                      <Option value="G" selected={item.Documentindicator === 'G'}>G — Sales Contract</Option>
                     </Select>
                   </div>
                   <div>
