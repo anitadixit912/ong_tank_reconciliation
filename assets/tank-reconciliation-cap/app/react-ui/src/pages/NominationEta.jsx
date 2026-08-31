@@ -428,17 +428,15 @@ export default function NominationEta() {
       const data = await res.json();
       const result = data?.value || data;
       if (result?.success) {
-        const nomNum = result.Nominationnumber || '–';
         const itemLines = items.map((it, idx) =>
           `  - **Item ${idx + 1}:** ${it.Demandmaterial || '–'} | Qty: ${parseFloat(it.Nominatedqty || 0).toLocaleString()} ${it.Quantityunit || ''} | Location: ${it.Locationid || '–'} | Date: ${it.Scheduleddate || '–'} | Type: ${it.Itemtype || '–'}`
         ).join('\n');
-        setCreateMsg({ ok: true, text: `✅ Nomination ${nomNum} created successfully!` });
+        setCreateMsg({ ok: true, text: `✅ Nomination created successfully! Refresh the list in a few seconds to see it.` });
         setMessages(prev => [...prev, {
           role: 'assistant',
           text: [
             `✅ **Nomination Created Successfully**`,
             ``,
-            `- **Nomination #:** ${nomNum}`,
             `- **Transport System:** ${form.Transportsystem}`,
             `- **Nomination Type:** ${form.Nominationtype}`,
             `- **Mode of Transport:** ${form.Modeoftransport || '–'}`,
@@ -448,10 +446,12 @@ export default function NominationEta() {
             `- **Items (${items.length}):**`,
             itemLines,
             ``,
-            `Would you like me to propose an ETA for nomination **${nomNum}**?`,
+            `> ℹ️ S/4HANA assigns the nomination number asynchronously. Click **"Open Nominations"** and hit **Refresh** after a few seconds to see the new nomination and its number.`,
           ].join('\n'),
         }]);
-        setTimeout(() => { setShowCreate(false); setForm(EMPTY_FORM); setItems([{ Itemtype: '', Locationid: '', Demandmaterial: '', Nominatedqty: '', Quantityunit: '', Scheduleddate: '' }]); setCreateMsg(null); refreshNominations(); }, 1500);
+        setTimeout(() => { setShowCreate(false); setForm(EMPTY_FORM); setItems([{ Itemtype: '', Locationid: '', Demandmaterial: '', Nominatedqty: '', Quantityunit: '', Scheduleddate: '' }]); setCreateMsg(null); }, 1500);
+        // Auto-refresh nominations list after 10s to catch S/4HANA async commit
+        setTimeout(() => refreshNominations(), 10000);
       } else {
         setCreateMsg({ ok: false, text: `❌ ${result?.message || 'Failed to create nomination'}` });
       }
