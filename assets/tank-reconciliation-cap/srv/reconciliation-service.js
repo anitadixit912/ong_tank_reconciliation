@@ -1093,13 +1093,14 @@ module.exports = class ReconciliationService extends cds.ApplicationService {
           let realNomNumber = '';
           const fetchHeaders = { Accept: 'application/json' };
           if (authHeader) fetchHeaders['Authorization'] = authHeader;
-          const filter = encodeURIComponent(`TransportSystem eq '${Transportsystem}'`);
+          const nomFilter = encodeURIComponent(`TransportSystem eq '${Transportsystem}'`);
           const nomPath = '/sap/opu/odata/sap/TSW_MYNOMINATIONS_SRV_01/C_Oij06_MyNominations'
-            + `?$filter=${filter}&$orderby=NominationDoc desc&$top=1&$format=json`;
+            + '?$filter=' + nomFilter + '&$orderby=NominationDoc%20desc&$top=1&$format=json';
           for (let attempt = 1; attempt <= 5; attempt++) {
             await new Promise(resolve => setTimeout(resolve, 3000));
             try {
               const nomRes = await _httpGet(baseUrl + nomPath, fetchHeaders, proxyOpts);
+              cds.log('s4').info('createNomination: fetch attempt ' + attempt + ' status=' + nomRes.status + ' body=' + nomRes.body.slice(0, 300));
               if (nomRes.status === 200) {
                 const nomData = JSON.parse(nomRes.body);
                 const latest  = (nomData.d?.results || [])[0];
@@ -1321,7 +1322,9 @@ async function _httpGet(url, headers, proxyOpts) {
   const https = require('https');
   const http  = require('http');
   return new Promise((resolve, reject) => {
-    const u    = new URL(url);
+    // new URL() rejects pre-encoded OData query strings — parse only the base URL for hostname/port
+    const baseOnly = url.split('?')[0];
+    const u    = new URL(baseOnly);
     let opts;
     if (proxyOpts && proxyOpts.host) {
       // Route through connectivity proxy for OnPremise destinations
@@ -1340,7 +1343,7 @@ async function _httpGet(url, headers, proxyOpts) {
       opts = {
         hostname: u.hostname,
         port:     u.port || (u.protocol === 'https:' ? 443 : 80),
-        path:     u.pathname + u.search,
+        path:     url.replace(/^https?:\/\/[^/]+/, ''),
         method:   'GET',
         headers
       };
