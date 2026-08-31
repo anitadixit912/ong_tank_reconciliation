@@ -1032,6 +1032,7 @@ module.exports = class ReconciliationService extends cds.ApplicationService {
           <ITEMNUMBER>${itemNo}</ITEMNUMBER>
           <ITEMTYPE>${item.Itemtype || 'D'}</ITEMTYPE>
           <ITEMSTATUS>1</ITEMSTATUS>
+          <DOCUMENTINDICATOR>X</DOCUMENTINDICATOR>
           <SCHEDULEDDATE>${dateFormatted}</SCHEDULEDDATE>
           <LOCATIONID>${item.Locationid || ''}</LOCATIONID>
           <DEMANDMATERIAL>${item.Demandmaterial || ''}</DEMANDMATERIAL>
