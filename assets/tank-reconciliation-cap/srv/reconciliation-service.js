@@ -1093,9 +1093,9 @@ module.exports = class ReconciliationService extends cds.ApplicationService {
           let realNomNumber = '';
           const fetchHeaders = { Accept: 'application/json' };
           if (authHeader) fetchHeaders['Authorization'] = authHeader;
-          const nomFilter = encodeURIComponent(`TransportSystem eq '${Transportsystem}'`);
+          // Fetch the highest nomination number overall — no filter, just top=1 descending
           const nomPath = '/sap/opu/odata/sap/TSW_MYNOMINATIONS_SRV_01/C_Oij06_MyNominations'
-            + '?$filter=' + nomFilter + '&$orderby=NominationDoc%20desc&$top=1&$format=json';
+            + '?$orderby=NominationDoc%20desc&$top=1&$format=json';
           for (let attempt = 1; attempt <= 5; attempt++) {
             await new Promise(resolve => setTimeout(resolve, 3000));
             try {

@@ -161,8 +161,14 @@ async function callNominationEtaAgent(userText, contextId) {
   return { text: 'No response received.', contextId: newContextId };
 }
 
-function NominationsListModal({ nominations, nomsLoading, onRefresh, onClose }) {
+function NominationsListModal({ nominations, nomsLoading, onRefresh, onClose, valueHelps }) {
   const [expanded, setExpanded] = useState({});
+
+  const modeDesc = (code) => {
+    if (!code) return '–';
+    const found = (valueHelps?.modesOfTransport || []).find(m => m.ModeOfTransport === code);
+    return found ? (found.Description && found.Description !== code ? `${code} — ${found.Description}` : code) : code;
+  };
 
   // Group items by nomination number
   const grouped = nominations.reduce((acc, n) => {
@@ -232,7 +238,7 @@ function NominationsListModal({ nominations, nomsLoading, onRefresh, onClose }) 
                       <td style={{ padding: '8px 10px', fontWeight: 700, color: '#1a4e9c' }}>{nomDisp}</td>
                       <td style={{ padding: '8px 10px' }}>{g.header.Transportsystem || '–'}</td>
                       <td style={{ padding: '8px 10px' }}>{g.header.Nominationtype || '–'}</td>
-                      <td style={{ padding: '8px 10px' }}>{g.header.Modeoftransport || '–'}</td>
+                      <td style={{ padding: '8px 10px' }}>{modeDesc(g.header.Modeoftransport)}</td>
                       <td style={{ padding: '8px 10px', textAlign: 'right', color: '#555' }}>{g.items.length}</td>
                       <td style={{ padding: '8px 10px' }}>{statusBadge(g.header.Nomstatus)}</td>
                     </tr>,
@@ -483,6 +489,7 @@ export default function NominationEta() {
           nomsLoading={nomsLoading}
           onRefresh={refreshNominations}
           onClose={() => setShowNominationsList(false)}
+          valueHelps={valueHelps}
         />
       )}
 
