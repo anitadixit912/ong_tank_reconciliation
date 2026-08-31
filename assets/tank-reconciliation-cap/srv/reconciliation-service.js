@@ -220,28 +220,46 @@ async function _fetchOpenNominations() {
     if (authHeader) headers['Authorization'] = authHeader;
     const proxyOpts = cfg._proxyHost ? { host: cfg._proxyHost, port: cfg._proxyPort, token: cfg._proxyToken, locationId: cfg._locationId } : null;
 
-    const path = '/sap/opu/odata/sap/TSW_MYNOMINATIONS_SRV_01/I_NominationHeaderFld?$format=json&$top=200';
+    const path = '/sap/opu/odata/sap/TSW_MYNOMINATIONS_SRV_01/C_Oij06_MyNominations?$format=json&$top=200';
     const res = await _httpGet(baseUrl + path, headers, proxyOpts);
     if (res.status !== 200) {
-      cds.log('s4').warn('I_NominationHeaderFld returned ' + res.status);
+      cds.log('s4').warn('C_Oij06_MyNominations returned ' + res.status);
       return [];
     }
     const payload = JSON.parse(res.body);
     const results = (payload.d && payload.d.results) ? payload.d.results : [];
-    // Map TSW_MYNOMINATIONS_SRV_01 field names to the shape the rest of the code expects
-    return results.map(n => ({
-      Nominationnumber: n.NominationNumber      || n.Nominationnumber || '',
-      Itemnumber:       n.NominationItem        || n.Itemnumber       || '',
-      Itemstatus:       n.NominationItemStatus  || n.Itemstatus       || '',
-      Itemtype:         n.NominationItemType    || n.Itemtype         || '',
-      Scheduleddate:    n.NominationDate        || n.Scheduleddate    || '',
-      Locationid:       n.NominationLocation    || n.Locationid       || '',
-      Demandmaterial:   n.NominationMaterial    || n.Demandmaterial   || '',
-      Nominatedqty:     n.NominationQuantity    || n.Nominatedqty     || '',
-      Quantityunit:     n.NominationQuantityUnit|| n.Quantityunit     || '',
-      Nomstatus:        n.NominationStatus      || n.Nomstatus        || '',
-      Transportsystem:  n.TransportSystem       || n.Transportsystem  || '',
-    }));
+    return results.map(n => {
+      // Parse OData /Date(ms)/ to YYYY-MM-DD
+      const parseDate = v => {
+        if (!v) return '';
+        const m = String(v).match(/\/Date\((\d+)/);
+        return m ? new Date(parseInt(m[1])).toISOString().slice(0,10) : v;
+      };
+      return {
+        Nominationnumber: n.NominationDoc          || '',
+        Itemnumber:       n.NominationDocItem      || '',
+        Itemstatus:       n.NominationItemStatus   || '',
+        Itemtype:         n.NominationScheduleType || '',
+        Scheduleddate:    parseDate(n.NominationScheduleDate),
+        Locationid:       n.LocationId             || '',
+        Demandmaterial:   n.DemandMaterial         || '',
+        Nominatedqty:     n.ScheduledQuantity       || '',
+        Quantityunit:     n.ScheduledQuantityUnit   || '',
+        Nomstatus:        n.NominationHeaderStatus  || '',
+        Transportsystem:  n.TransportSystem         || '',
+        Nominationtype:   n.NominationType          || '',
+        Modeoftransport:  n.NominationModeOfTransport || '',
+        MaterialDesc:     n.MaterialDesc            || '',
+        LocationName:     n.LocationName            || '',
+        TransportSystemDesc: n.TransportSystemDesc  || '',
+        Carrier:          n.NominationCarrier       || '',
+        CarrierDesc:      n.NominationCarrierDesc   || '',
+        Shipper:          n.NominationShipper       || '',
+        ShipperDesc:      n.NominationShipperDesc   || '',
+        InTransitPlant:   n.InTransitPlant          || '',
+        VehicleId:        n.VehicleId               || '',
+      };
+    });
   } catch (err) {
     cds.log('s4').warn('Failed to fetch nominations: ' + err.message);
     return [];
@@ -897,8 +915,8 @@ module.exports = class ReconciliationService extends cds.ApplicationService {
 
     // ── getNominationValueHelps ──────────────────────────────────────────────
     this.on('getNominationValueHelps', async (req) => {
-      let locations = [];
       let baseUrl = '', headers = { Accept: 'application/json' }, proxyOpts = null;
+      const BASE = '/sap/opu/odata/sap/TSW_MYNOMINATIONS_SRV_01';
 
       try {
         const cfg = await _resolveDestination(S4HANA_DESTINATION);
@@ -906,93 +924,34 @@ module.exports = class ReconciliationService extends cds.ApplicationService {
         const authHeader = _basicAuthHeader(cfg);
         if (authHeader) headers['Authorization'] = authHeader;
         proxyOpts = cfg._proxyHost ? { host: cfg._proxyHost, port: cfg._proxyPort, token: cfg._proxyToken, locationId: cfg._locationId } : null;
-
-        // Try fetching from ZTANK_DIP_SRV_SRV LocationSet
-        const locRes = await _httpGet(baseUrl + S4_DIP_PATH + '/LocationSet?$format=json&$top=200', headers, proxyOpts);
-        if (locRes.status === 200) {
-          const locData = JSON.parse(locRes.body);
-          locations = (locData.d?.results || []).map(l => ({
-            Locationid:   l.Locationid || l.LOCID || l.Locid || '',
-            Description:  l.Description || l.DESCR || l.Name || l.Locationid || '',
-          })).filter(l => l.Locationid);
-        }
       } catch(e) {
-        cds.log('s4').warn('LocationSet fetch failed: ' + e.message);
+        cds.log('s4').warn('Destination resolve failed: ' + e.message);
       }
 
-      // Fallback — derive from existing nominations if LocationSet not available
-      if (!locations.length) {
-        const nominations = await _fetchOpenNominations();
-        locations = [...new Set(nominations.map(n => n.Locationid).filter(Boolean))].sort()
-          .map(v => ({ Locationid: v, Description: v }));
-      }
+      const _vhFetch = async (entity, map) => {
+        try {
+          const r = await _httpGet(baseUrl + BASE + '/' + entity + '?$format=json&$top=200', headers, proxyOpts);
+          if (r.status === 200) {
+            const rows = JSON.parse(r.body).d?.results || [];
+            if (rows.length && entity === 'SITYPSet') cds.log('s4').info('SITYPSet keys: ' + Object.keys(rows[0]).filter(k => k !== '__metadata').join(', '));
+            return rows.map(map).filter(Boolean);
+          }
+          cds.log('s4').warn(entity + ' returned ' + r.status);
+        } catch(e) { cds.log('s4').warn(entity + ' failed: ' + e.message); }
+        return [];
+      };
 
-      // Materials and transport systems from existing nominations
-      const nominations = await _fetchOpenNominations();
-      const materials        = [...new Set(nominations.map(n => n.Demandmaterial).filter(Boolean))].sort().map(v => ({ Demandmaterial: v }));
-      const transportSystems = [...new Set(nominations.map(n => n.Transportsystem).filter(Boolean))].sort().map(v => ({ Transportsystem: v }));
+      const [locations, materials, transportSystems, quantityUnits, nominationTypes, itemTypes, modesOfTransport] = await Promise.all([
+        _vhFetch('I_LocationIdVH',             r => r.LocationId         ? { Locationid: r.LocationId, Description: r.LocationName || r.LocationId } : null),
+        _vhFetch('I_ScheduledMaterialVH',      r => r.ScheduledMaterial  ? { Demandmaterial: r.ScheduledMaterial, Description: r.MaterialDesc || r.ScheduledMaterial } : null),
+        _vhFetch('I_NominationTransptSystVH',  r => r.TransportSystem    ? { Transportsystem: r.TransportSystem, Description: r.TransportSystemName || r.TransportSystem } : null),
+        _vhFetch('I_NominationUoMVH',          r => r.TicketUnitOfMeasure ? { Unit: r.TicketUnitOfMeasure, Description: r.TicketUnitOfMeasureDescription || r.TicketUnitOfMeasure } : null),
+        _vhFetch('I_NominationTypeVH',         r => r.NominationType     ? { Nominationtype: r.NominationType, Description: r.NominationTypeDescription || r.NominationType } : null),
+        _vhFetch('SITYPSet',                   r => r.Sityp ? { Itemtype: r.Sityp, Description: r.Description || r.Ltx || r.Kbez || r.Sityp } : null),
+        _vhFetch('I_NominationModeOfTranspVH', r => r.ModeOfTransport    ? { ModeOfTransport: r.ModeOfTransport, Description: r.ModeOfTransportDesc || r.ModeOfTransport } : null),
+      ]);
 
-      // Quantity units from live S/4HANA UoM service
-      let quantityUnits = [];
-      try {
-        const uomRes = await _httpGet(baseUrl + '/sap/opu/odata/sap/TSW_MYNOMINATIONS_SRV_01/I_NominationUoMVH?$format=json&$top=50', headers, proxyOpts);
-        if (uomRes.status === 200) {
-          const uomData = JSON.parse(uomRes.body);
-          quantityUnits = (uomData.d?.results || []).map(u => ({
-            Unit: u.TicketUnitOfMeasure,
-            Description: u.TicketUnitOfMeasureDescription || u.TicketUnitOfMeasure
-          })).filter(u => u.Unit);
-        }
-        cds.log('s4').info('UoM fetch status=' + (quantityUnits.length ? quantityUnits.length + ' units' : 'empty'));
-      } catch(e) {
-        cds.log('s4').warn('UoM fetch failed: ' + e.message);
-      }
-
-      // Nomination types from live S/4HANA
-      let nominationTypes = [];
-      try {
-        const nomTypeRes = await _httpGet(baseUrl + '/sap/opu/odata/sap/TSW_MYNOMINATIONS_SRV_01/I_NominationTypeVH?$format=json&$top=50', headers, proxyOpts);
-        if (nomTypeRes.status === 200) {
-          const nomTypeData = JSON.parse(nomTypeRes.body);
-          nominationTypes = (nomTypeData.d?.results || []).map(t => ({
-            Nominationtype: t.NominationType,
-            Description: t.NominationTypeDescription || t.NominationType
-          })).filter(t => t.Nominationtype);
-        }
-        cds.log('s4').info('NominationType fetch: ' + nominationTypes.length + ' types');
-      } catch(e) {
-        cds.log('s4').warn('NominationType fetch failed: ' + e.message);
-      }
-
-      // Item types from live S/4HANA TSW_MYNOMINATIONS_SRV_01
-      let itemTypes = [];
-      try {
-        const itRes = await _httpGet(baseUrl + '/sap/opu/odata/sap/TSW_MYNOMINATIONS_SRV_01/I_NominationItemTypeVH?$format=json&$top=100', headers, proxyOpts);
-        cds.log('s4').info('ItemType fetch status=' + itRes.status + ' count=' + (itRes.status === 200 ? JSON.parse(itRes.body).d?.results?.length : 0));
-        if (itRes.status === 200) {
-          const itData = JSON.parse(itRes.body);
-          itemTypes = (itData.d?.results || []).map(t => ({
-            Itemtype: t.NominationItemType || t.ItemType || t.Itemtype,
-            Description: t.NominationItemTypeDesc || t.ItemTypeDescription || t.NominationItemType || t.ItemType || t.Itemtype
-          })).filter(t => t.Itemtype);
-        }
-      } catch(e) {
-        cds.log('s4').warn('ItemType fetch failed: ' + e.message);
-      }
-
-      // Modes of transport from live S/4HANA
-      let modesOfTransport = [];
-      try {
-        const motRes = await _httpGet(baseUrl + '/sap/opu/odata/sap/TSW_MYNOMINATIONS_SRV_01/I_NominationModeOfTranspVH?$format=json&$top=50', headers, proxyOpts);
-        if (motRes.status === 200) {
-          const motData = JSON.parse(motRes.body);
-          modesOfTransport = (motData.d?.results || []).map(m => ({
-            ModeOfTransport: m.ModeOfTransport, Description: m.ModeOfTransportDesc || m.ModeOfTransport
-          })).filter(m => m.ModeOfTransport);
-        }
-      } catch(e) {
-        cds.log('s4').warn('ModeOfTransport fetch failed: ' + e.message);
-      }
+      cds.log('s4').info('ValueHelps: loc=' + locations.length + ' mat=' + materials.length + ' ts=' + transportSystems.length + ' uom=' + quantityUnits.length + ' nt=' + nominationTypes.length + ' it=' + itemTypes.length + ' mot=' + modesOfTransport.length);
 
       return { locations, materials, transportSystems, quantityUnits, nominationTypes, itemTypes, modesOfTransport };
     });
@@ -1101,14 +1060,26 @@ module.exports = class ReconciliationService extends cds.ApplicationService {
         const soapHeaders = { 'Content-Type': 'text/xml; charset=utf-8', 'SOAPAction': 'RFC_TSW_NOM_CREATEFROMDATA' };
         if (authHeader) soapHeaders['Authorization'] = authHeader;
 
+        // Fetch CSRF token — SAP SOAP gateway requires it for state-changing RFCs
+        try {
+          const csrfRes = await _httpGet(baseUrl + '/sap/bc/soap/rfc', { ...soapHeaders, 'x-csrf-token': 'Fetch' }, proxyOpts);
+          const csrfToken = csrfRes.headers && (csrfRes.headers['x-csrf-token'] || csrfRes.headers['X-CSRF-Token']);
+          if (csrfToken && csrfToken !== 'Required') soapHeaders['x-csrf-token'] = csrfToken;
+          const setCookie = csrfRes.headers && csrfRes.headers['set-cookie'];
+          if (setCookie) {
+            const cookies = Array.isArray(setCookie) ? setCookie : [setCookie];
+            soapHeaders['Cookie'] = cookies.map(c => c.split(';')[0]).join('; ');
+          }
+          cds.log('s4').info('createNomination: CSRF=' + (csrfToken ? 'found' : 'MISSING'));
+        } catch (csrfErr) {
+          cds.log('s4').warn('createNomination: CSRF fetch failed: ' + csrfErr.message);
+        }
+
         cds.log('s4').info('createNomination: calling RFC via SOAP');
         const soapRes = await _httpPost(soapUrl, soapBody, soapHeaders, proxyOpts);
-        cds.log('s4').info('createNomination: SOAP status=' + soapRes.status + ' body=' + soapRes.body.slice(0, 800));
+        cds.log('s4').info('createNomination: SOAP status=' + soapRes.status + ' body=' + soapRes.body.slice(0, 1200));
 
         if (soapRes.status === 200) {
-          const nomExtMatch = soapRes.body.match(/<NOMINATIONNUMBER_EXT[^>]*>([^<]+)<\/NOMINATIONNUMBER_EXT>/i);
-          const nomSapMatch = soapRes.body.match(/<NOMINATIONNUMBER_SAP[^>]*>([^<]+)<\/NOMINATIONNUMBER_SAP>/i);
-          const nomNumber   = (nomExtMatch ? nomExtMatch[1].trim() : '') || (nomSapMatch ? nomSapMatch[1].trim() : '');
           // Check all TYPE tags in RETURN table for errors
           const typeMatches = [...soapRes.body.matchAll(/<TYPE[^>]*>([^<]+)<\/TYPE>/gi)];
           const hasError    = typeMatches.some(m => m[1] === 'E' || m[1] === 'A');
@@ -1116,7 +1087,29 @@ module.exports = class ReconciliationService extends cds.ApplicationService {
           if (hasError) {
             return { success: false, Nominationnumber: '', message: errorMatch ? errorMatch[1] : 'RFC returned error' };
           }
-          return { success: true, Nominationnumber: nomNumber, message: `Nomination ${nomNumber} created successfully.` };
+
+          // S/4HANA returns $0000000000000000001 as a placeholder — the real number is committed
+          // asynchronously. Wait 2s then fetch the latest nomination for this transport system.
+          await new Promise(resolve => setTimeout(resolve, 2000));
+          let realNomNumber = '';
+          try {
+            const fetchHeaders = { Accept: 'application/json' };
+            if (authHeader) fetchHeaders['Authorization'] = authHeader;
+            const filter = encodeURIComponent(`TransportSystem eq '${Transportsystem}'`);
+            const nomPath = '/sap/opu/odata/sap/TSW_MYNOMINATIONS_SRV_01/C_Oij06_MyNominations'
+              + `?$filter=${filter}&$orderby=NominationDoc desc&$top=1&$format=json`;
+            const nomRes = await _httpGet(baseUrl + nomPath, fetchHeaders, proxyOpts);
+            if (nomRes.status === 200) {
+              const nomData = JSON.parse(nomRes.body);
+              const latest  = (nomData.d?.results || [])[0];
+              if (latest && latest.NominationDoc) realNomNumber = latest.NominationDoc;
+            }
+            cds.log('s4').info('createNomination: resolved real nom number=' + realNomNumber);
+          } catch (fetchErr) {
+            cds.log('s4').warn('createNomination: failed to resolve real nom number: ' + fetchErr.message);
+          }
+
+          return { success: true, Nominationnumber: realNomNumber, message: `Nomination ${realNomNumber} created successfully.` };
         } else {
           const faultMatch = soapRes.body.match(/<faultstring[^>]*>([^<]+)<\/faultstring>/i);
           return { success: false, Nominationnumber: '', message: faultMatch ? faultMatch[1] : 'SOAP HTTP ' + soapRes.status };
@@ -1139,6 +1132,7 @@ module.exports = class ReconciliationService extends cds.ApplicationService {
         const proxyOpts = cfg._proxyHost ? { host: cfg._proxyHost, port: cfg._proxyPort, token: cfg._proxyToken, locationId: cfg._locationId } : null;
 
         const services = [
+          '/sap/opu/odata/sap/TSW_MYNOMINATIONS_SRV_01',
           '/sap/opu/odata/sap/API_TSW_NOMINATION_SRV',
           '/sap/opu/odata/sap/CATSBU_TSW_NOMINATION_SRV',
           '/sap/opu/odata/sap/API_OIL_SCHD_TRANS_WORKBENCH_SRV',

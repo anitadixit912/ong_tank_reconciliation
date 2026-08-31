@@ -74,10 +74,19 @@ export default function ApprovalQueue() {
   const [reasonCodes, setReasonCodes] = useState([]);
   const [nominations, setNominations] = useState([]);
   const [showNominations, setShowNominations] = useState(false);
+  const [nomsLoading, setNomsLoading] = useState(false);
+
+  const refreshNominations = useCallback(() => {
+    setNomsLoading(true);
+    fetchOpenNominations()
+      .then(noms => setNominations(noms))
+      .catch(() => setNominations([]))
+      .finally(() => setNomsLoading(false));
+  }, []);
 
   useEffect(() => {
-    fetchOpenNominations().then(noms => setNominations(noms)).catch(() => setNominations([]));
-  }, []);
+    refreshNominations();
+  }, [refreshNominations]);
 
   useEffect(() => {
     fetchReasonCodes().then(codes => {
@@ -319,10 +328,16 @@ export default function ApprovalQueue() {
                       <div className="form-label" style={{ fontWeight: 600 }}>
                         📋 Open TSW Nominations ({tankNoms.length})
                       </div>
-                      <button className="btn btn-outline" style={{ fontSize: '0.7rem' }}
-                              onClick={() => setShowNominations(true)}>
-                        View All
-                      </button>
+                      <div style={{ display: 'flex', gap: '0.4rem' }}>
+                        <button className="btn btn-outline" style={{ fontSize: '0.7rem' }}
+                                onClick={refreshNominations} disabled={nomsLoading}>
+                          {nomsLoading ? '…' : '↻'}
+                        </button>
+                        <button className="btn btn-outline" style={{ fontSize: '0.7rem' }}
+                                onClick={() => setShowNominations(true)}>
+                          View All
+                        </button>
+                      </div>
                     </div>
                     <table style={{ width: '100%', fontSize: '0.72rem', borderCollapse: 'collapse' }}>
                       <thead>

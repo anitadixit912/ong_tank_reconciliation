@@ -1,5 +1,6 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
+import { fetchOpenNominations } from '../api.js';
 import {
   FlexBox,
   Title,
@@ -160,6 +161,125 @@ async function callNominationEtaAgent(userText, contextId) {
   return { text: 'No response received.', contextId: newContextId };
 }
 
+function NominationsListModal({ nominations, nomsLoading, onRefresh, onClose }) {
+  const [expanded, setExpanded] = useState({});
+
+  // Group items by nomination number
+  const grouped = nominations.reduce((acc, n) => {
+    const key = n.Nominationnumber || '–';
+    if (!acc[key]) acc[key] = { header: n, items: [] };
+    acc[key].items.push(n);
+    return acc;
+  }, {});
+  const groups = Object.values(grouped);
+  const totalNoms = groups.length;
+
+  const toggle = (key) => setExpanded(prev => ({ ...prev, [key]: !prev[key] }));
+
+  const statusBadge = (s) =>
+    s === '1' ? <span style={{ color: '#1a7a1a', fontWeight: 600 }}>🟢 Open</span>
+    : s === '2' ? <span style={{ color: '#b36b00', fontWeight: 600 }}>🟡 Transmitted</span>
+    : s ? <span style={{ color: '#c00', fontWeight: 600 }}>🔴 Closed</span>
+    : '–';
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999 }}>
+      <div style={{ background: '#fff', borderRadius: '12px', padding: '1.5rem', width: '960px', maxWidth: '97vw', maxHeight: '90vh', display: 'flex', flexDirection: 'column', boxShadow: '0 8px 32px rgba(0,0,0,0.18)' }}>
+        {/* Header */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+          <Title level="H4">📋 TSW Nominations ({totalNoms})</Title>
+          <FlexBox direction="Row" style={{ gap: '0.5rem' }}>
+            <Button design="Transparent" icon="refresh" onClick={onRefresh} disabled={nomsLoading}>
+              {nomsLoading ? 'Loading…' : 'Refresh'}
+            </Button>
+            <Button design="Transparent" onClick={onClose}>✕</Button>
+          </FlexBox>
+        </div>
+
+        {/* Body */}
+        <div style={{ overflowY: 'auto', flex: 1 }}>
+          {nomsLoading ? (
+            <div style={{ textAlign: 'center', padding: '2rem', color: '#888' }}>Loading nominations…</div>
+          ) : groups.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '2rem', color: '#888' }}>No nominations found.</div>
+          ) : (
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
+              <thead>
+                <tr style={{ background: '#f0f4ff', borderBottom: '2px solid #c8d4f0', position: 'sticky', top: 0 }}>
+                  <th style={{ padding: '8px 10px', textAlign: 'left', width: '28px' }}></th>
+                  <th style={{ padding: '8px 10px', textAlign: 'left' }}>Nomination #</th>
+                  <th style={{ padding: '8px 10px', textAlign: 'left' }}>Transport System</th>
+                  <th style={{ padding: '8px 10px', textAlign: 'left' }}>Type</th>
+                  <th style={{ padding: '8px 10px', textAlign: 'left' }}>Mode</th>
+                  <th style={{ padding: '8px 10px', textAlign: 'right' }}>Items</th>
+                  <th style={{ padding: '8px 10px', textAlign: 'left' }}>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {groups.map((g, gi) => {
+                  const nomKey  = g.header.Nominationnumber || '–';
+                  const nomDisp = nomKey.replace(/^[$0]+/, '') || nomKey;
+                  const isOpen  = expanded[nomKey];
+                  const rowBg   = gi % 2 === 0 ? '#fff' : '#f7f9ff';
+                  return [
+                    /* ── Nomination header row ── */
+                    <tr key={'h-' + gi}
+                      onClick={() => toggle(nomKey)}
+                      style={{ background: rowBg, borderBottom: isOpen ? 'none' : '1px solid #e8eaf0', cursor: 'pointer' }}>
+                      <td style={{ padding: '8px 6px 8px 12px', color: '#555', fontSize: '0.8rem' }}>
+                        {isOpen ? '▾' : '▸'}
+                      </td>
+                      <td style={{ padding: '8px 10px', fontWeight: 700, color: '#1a4e9c' }}>{nomDisp}</td>
+                      <td style={{ padding: '8px 10px' }}>{g.header.Transportsystem || '–'}</td>
+                      <td style={{ padding: '8px 10px' }}>{g.header.Nominationtype || '–'}</td>
+                      <td style={{ padding: '8px 10px' }}>{g.header.Modeoftransport || '–'}</td>
+                      <td style={{ padding: '8px 10px', textAlign: 'right', color: '#555' }}>{g.items.length}</td>
+                      <td style={{ padding: '8px 10px' }}>{statusBadge(g.header.Nomstatus)}</td>
+                    </tr>,
+                    /* ── Expanded items sub-table ── */
+                    isOpen && (
+                      <tr key={'items-' + gi} style={{ background: rowBg }}>
+                        <td colSpan={7} style={{ padding: '0 0 8px 36px', borderBottom: '1px solid #e8eaf0' }}>
+                          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem' }}>
+                            <thead>
+                              <tr style={{ background: '#eef1fa' }}>
+                                <th style={{ padding: '5px 8px', textAlign: 'left', color: '#555', fontWeight: 600 }}>Item</th>
+                                <th style={{ padding: '5px 8px', textAlign: 'left', color: '#555', fontWeight: 600 }}>Material</th>
+                                <th style={{ padding: '5px 8px', textAlign: 'right', color: '#555', fontWeight: 600 }}>Qty</th>
+                                <th style={{ padding: '5px 8px', textAlign: 'left', color: '#555', fontWeight: 600 }}>UoM</th>
+                                <th style={{ padding: '5px 8px', textAlign: 'left', color: '#555', fontWeight: 600 }}>Sched. Date</th>
+                                <th style={{ padding: '5px 8px', textAlign: 'left', color: '#555', fontWeight: 600 }}>Location</th>
+                                <th style={{ padding: '5px 8px', textAlign: 'left', color: '#555', fontWeight: 600 }}>Item Type</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {g.items.map((it, ii) => (
+                                <tr key={ii} style={{ borderTop: '1px solid #dde', background: ii % 2 === 0 ? '#fff' : '#f4f6fd' }}>
+                                  <td style={{ padding: '5px 8px', color: '#666' }}>{it.Itemnumber?.replace(/^0+/, '') || '–'}</td>
+                                  <td style={{ padding: '5px 8px' }}>{it.Demandmaterial || '–'}</td>
+                                  <td style={{ padding: '5px 8px', textAlign: 'right' }}>{parseFloat(it.Nominatedqty || 0).toLocaleString()}</td>
+                                  <td style={{ padding: '5px 8px' }}>{it.Quantityunit || '–'}</td>
+                                  <td style={{ padding: '5px 8px' }}>{it.Scheduleddate || '–'}</td>
+                                  <td style={{ padding: '5px 8px' }}>{it.Locationid || '–'}</td>
+                                  <td style={{ padding: '5px 8px' }}>{it.Itemtype === 'O' ? '📤 Origin' : it.Itemtype === 'D' ? '📥 Dest' : it.Itemtype || '–'}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </td>
+                      </tr>
+                    )
+                  ];
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function NominationEta() {
   const [messages, setMessages] = useState(() => {
     try {
@@ -176,7 +296,18 @@ export default function NominationEta() {
   const [creating, setCreating]     = useState(false);
   const [createMsg, setCreateMsg]   = useState(null);
   const [valueHelps, setValueHelps] = useState({ locations: [], materials: [], transportSystems: [], quantityUnits: [], nominationTypes: [], itemTypes: [], modesOfTransport: [] });
+  const [nominations, setNominations]         = useState([]);
+  const [nomsLoading, setNomsLoading]         = useState(false);
+  const [showNominationsList, setShowNominationsList] = useState(false);
   const bottomRef                   = useRef(null);
+
+  const refreshNominations = useCallback(() => {
+    setNomsLoading(true);
+    fetchOpenNominations()
+      .then(noms => setNominations(noms))
+      .catch(() => setNominations([]))
+      .finally(() => setNomsLoading(false));
+  }, []);
 
   useEffect(() => {
     fetch('/reconciliation/getNominationValueHelps', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
@@ -186,7 +317,8 @@ export default function NominationEta() {
         if (vh?.locations) setValueHelps(vh);
       })
       .catch(() => {});
-  }, []);
+    refreshNominations();
+  }, [refreshNominations]);
 
   const onTransportsystemChange = async (ts) => {
     setForm(f => ({ ...f, Transportsystem: ts, Carrier: '', CarrierName: '', Shipper: '', ShipperName: '' }));
@@ -290,12 +422,30 @@ export default function NominationEta() {
       const data = await res.json();
       const result = data?.value || data;
       if (result?.success) {
-        setCreateMsg({ ok: true, text: `✅ Nomination ${result.Nominationnumber || ''} created successfully!` });
+        const nomNum = result.Nominationnumber || '–';
+        const itemLines = items.map((it, idx) =>
+          `  - **Item ${idx + 1}:** ${it.Demandmaterial || '–'} | Qty: ${parseFloat(it.Nominatedqty || 0).toLocaleString()} ${it.Quantityunit || ''} | Location: ${it.Locationid || '–'} | Date: ${it.Scheduleddate || '–'} | Type: ${it.Itemtype || '–'}`
+        ).join('\n');
+        setCreateMsg({ ok: true, text: `✅ Nomination ${nomNum} created successfully!` });
         setMessages(prev => [...prev, {
           role: 'assistant',
-          text: `✅ **Nomination Created**\n\n- **Nomination #:** ${result.Nominationnumber}\n- **Transport System:** ${form.Transportsystem}\n- **Type:** ${form.Nominationtype}\n- **Items:** ${items.length}\n\nWould you like me to propose an ETA for this nomination?`,
+          text: [
+            `✅ **Nomination Created Successfully**`,
+            ``,
+            `- **Nomination #:** ${nomNum}`,
+            `- **Transport System:** ${form.Transportsystem}`,
+            `- **Nomination Type:** ${form.Nominationtype}`,
+            `- **Mode of Transport:** ${form.Modeoftransport || '–'}`,
+            `- **Vehicle ID:** ${form.Vehicleid || '–'}`,
+            `- **Carrier:** ${form.Carrier ? `${form.Carrier}${form.CarrierName ? ' — ' + form.CarrierName : ''}` : '–'}`,
+            `- **Shipper:** ${form.Shipper ? `${form.Shipper}${form.ShipperName ? ' — ' + form.ShipperName : ''}` : '–'}`,
+            `- **Items (${items.length}):**`,
+            itemLines,
+            ``,
+            `Would you like me to propose an ETA for nomination **${nomNum}**?`,
+          ].join('\n'),
         }]);
-        setTimeout(() => { setShowCreate(false); setForm(EMPTY_FORM); setItems([{ Itemtype: '', Locationid: '', Demandmaterial: '', Nominatedqty: '', Quantityunit: '', Scheduleddate: '' }]); setCreateMsg(null); }, 1500);
+        setTimeout(() => { setShowCreate(false); setForm(EMPTY_FORM); setItems([{ Itemtype: '', Locationid: '', Demandmaterial: '', Nominatedqty: '', Quantityunit: '', Scheduleddate: '' }]); setCreateMsg(null); refreshNominations(); }, 1500);
       } else {
         setCreateMsg({ ok: false, text: `❌ ${result?.message || 'Failed to create nomination'}` });
       }
@@ -314,6 +464,9 @@ export default function NominationEta() {
       <FlexBox direction="Row" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
         <Title level="H3">🚢 TSW Nomination Agent</Title>
         <FlexBox direction="Row" style={{ gap: '0.5rem' }}>
+          <Button design="Default" icon="list" onClick={() => { setShowNominationsList(true); refreshNominations(); }}>
+            Open Nominations {nominations.length > 0 ? `(${nominations.length})` : ''}
+          </Button>
           <Button design="Emphasized" icon="add" onClick={() => { setShowCreate(true); setCreateMsg(null); }}>
             Create Nomination
           </Button>
@@ -322,6 +475,16 @@ export default function NominationEta() {
           </Button>
         </FlexBox>
       </FlexBox>
+
+      {/* Open Nominations Modal */}
+      {showNominationsList && (
+        <NominationsListModal
+          nominations={nominations}
+          nomsLoading={nomsLoading}
+          onRefresh={refreshNominations}
+          onClose={() => setShowNominationsList(false)}
+        />
+      )}
 
       {/* Create Nomination Modal */}
       {showCreate && (
