@@ -55,19 +55,21 @@ async def _fetch_all_nominations() -> list[dict]:
 
 
 def _normalize_nomination_number(nomination_number: str) -> str:
-    """Normalize nomination number — zero-pad to 20 chars if numeric."""
+    """Normalize nomination number — strip leading zeros for comparison."""
     stripped = nomination_number.strip().lstrip("0")
-    try:
-        int(stripped)
-        return nomination_number.strip().zfill(20)
-    except ValueError:
-        return nomination_number.strip()
+    return stripped if stripped else "0"
+
+
+def _match_nomination(n: dict, normalized: str) -> bool:
+    """Match a nomination record against a normalized (stripped) number."""
+    raw = n.get("Nominationnumber", "").strip().lstrip("0")
+    return raw == normalized
 
 
 # ── Tool 1: get_nomination ────────────────────────────────────────────────────
 
 class GetNominationInput(BaseModel):
-    nomination_number: str = Field(description="Nomination number to retrieve (e.g. 4500001234 or 00000000000000000011)")
+    nomination_number: str = Field(description="Nomination number to retrieve (e.g. 128 or 00000000000000000128)")
 
 
 async def _get_nomination(nomination_number: str) -> str:
@@ -76,17 +78,17 @@ async def _get_nomination(nomination_number: str) -> str:
         nominations = await _fetch_all_nominations()
 
         match = next(
-            (n for n in nominations if n.get("Nominationnumber", "").strip() == normalized),
+            (n for n in nominations if _match_nomination(n, normalized)),
             None,
         )
         if not match:
+            available = [n.get("Nominationnumber", "").strip().lstrip("0") for n in nominations]
             return json.dumps({
                 "found": False,
                 "nomination_number": nomination_number,
-                "normalized": normalized,
                 "message": (
-                    f"Nomination '{nomination_number}' not found in the open nominations list. "
-                    f"Available nominations: {[n.get('Nominationnumber','').strip() for n in nominations]}"
+                    f"Nomination '{nomination_number}' not found. "
+                    f"Available nominations: {available}"
                 ),
             })
         return json.dumps({"found": True, "nomination": match}, indent=2, default=str)
@@ -117,7 +119,7 @@ async def _list_nominations() -> str:
             return json.dumps({"found": False, "message": "No open nominations found."})
         summary = [
             {
-                "nomination_number": n.get("Nominationnumber", "").strip(),
+                "nomination_number": n.get("Nominationnumber", "").strip().lstrip("0") or "0",
                 "location": n.get("Locationid", ""),
                 "material": n.get("Demandmaterial", ""),
                 "transport_system": n.get("Transportsystem", ""),
