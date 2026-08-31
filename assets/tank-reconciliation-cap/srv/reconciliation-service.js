@@ -1091,7 +1091,7 @@ module.exports = class ReconciliationService extends cds.ApplicationService {
 
         cds.log('s4').info('createNomination: calling RFC via SOAP');
         const soapRes = await _httpPost(soapUrl, soapBody, soapHeaders, proxyOpts);
-        cds.log('s4').info('createNomination: SOAP status=' + soapRes.status + ' body=' + soapRes.body.slice(0, 1200));
+        cds.log('s4').info('createNomination: SOAP status=' + soapRes.status + ' body=' + soapRes.body.slice(0, 5000));
 
         if (soapRes.status === 200) {
           // Check all TYPE tags in RETURN table for errors
