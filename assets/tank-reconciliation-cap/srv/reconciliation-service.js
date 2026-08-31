@@ -1089,24 +1089,30 @@ module.exports = class ReconciliationService extends cds.ApplicationService {
           }
 
           // S/4HANA returns $0000000000000000001 as a placeholder — the real number is committed
-          // asynchronously. Wait 2s then fetch the latest nomination for this transport system.
-          await new Promise(resolve => setTimeout(resolve, 2000));
+          // asynchronously. Retry up to 5 times (max ~15s) until a real number appears.
           let realNomNumber = '';
-          try {
-            const fetchHeaders = { Accept: 'application/json' };
-            if (authHeader) fetchHeaders['Authorization'] = authHeader;
-            const filter = encodeURIComponent(`TransportSystem eq '${Transportsystem}'`);
-            const nomPath = '/sap/opu/odata/sap/TSW_MYNOMINATIONS_SRV_01/C_Oij06_MyNominations'
-              + `?$filter=${filter}&$orderby=NominationDoc desc&$top=1&$format=json`;
-            const nomRes = await _httpGet(baseUrl + nomPath, fetchHeaders, proxyOpts);
-            if (nomRes.status === 200) {
-              const nomData = JSON.parse(nomRes.body);
-              const latest  = (nomData.d?.results || [])[0];
-              if (latest && latest.NominationDoc) realNomNumber = latest.NominationDoc;
+          const fetchHeaders = { Accept: 'application/json' };
+          if (authHeader) fetchHeaders['Authorization'] = authHeader;
+          const filter = encodeURIComponent(`TransportSystem eq '${Transportsystem}'`);
+          const nomPath = '/sap/opu/odata/sap/TSW_MYNOMINATIONS_SRV_01/C_Oij06_MyNominations'
+            + `?$filter=${filter}&$orderby=NominationDoc desc&$top=1&$format=json`;
+          for (let attempt = 1; attempt <= 5; attempt++) {
+            await new Promise(resolve => setTimeout(resolve, 3000));
+            try {
+              const nomRes = await _httpGet(baseUrl + nomPath, fetchHeaders, proxyOpts);
+              if (nomRes.status === 200) {
+                const nomData = JSON.parse(nomRes.body);
+                const latest  = (nomData.d?.results || [])[0];
+                if (latest && latest.NominationDoc && !latest.NominationDoc.startsWith('$')) {
+                  realNomNumber = latest.NominationDoc;
+                  cds.log('s4').info('createNomination: resolved real nom number=' + realNomNumber + ' on attempt ' + attempt);
+                  break;
+                }
+              }
+              cds.log('s4').info('createNomination: nom number not ready yet, attempt ' + attempt);
+            } catch (fetchErr) {
+              cds.log('s4').warn('createNomination: fetch attempt ' + attempt + ' failed: ' + fetchErr.message);
             }
-            cds.log('s4').info('createNomination: resolved real nom number=' + realNomNumber);
-          } catch (fetchErr) {
-            cds.log('s4').warn('createNomination: failed to resolve real nom number: ' + fetchErr.message);
           }
 
           return { success: true, Nominationnumber: realNomNumber, message: `Nomination ${realNomNumber} created successfully.` };
