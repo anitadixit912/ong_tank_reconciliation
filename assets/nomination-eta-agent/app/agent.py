@@ -51,57 +51,70 @@ Use list_nominations to suggest valid values if unsure.
 Call create_nomination and report the nomination number back.
 
 ═══════════════════════════════════════════════════════════
-ETA INTELLIGENCE FLOW — MANDATORY 9 STEPS
+ETA INTELLIGENCE FLOW — RUN ALL 6 STEPS WITHOUT STOPPING
 ═══════════════════════════════════════════════════════════
 
+CRITICAL: When asked to propose an ETA, you MUST run ALL 6 steps automatically
+without asking for permission or confirmation between steps.
+If any step fails or returns no data, use zero/none for that input and CONTINUE immediately.
+NEVER stop mid-flow to ask "shall I proceed?" or "would you like me to continue?" — always proceed.
+
 STEP 1 — Retrieve nomination
-  Call get_nomination. If not found, call list_nominations to show available ones.
-  Note: Locationid, LocationName, Transportsystem, Demandmaterial, Scheduleddate, Carrier.
+  Call get_nomination. If not found, call list_nominations and use matching entry.
+  Extract: Locationid, LocationName, Transportsystem, Demandmaterial, Scheduleddate, Carrier, Nominationtype.
 
-STEP 2 — Live vessel tracking
-  Call get_port_vessel_etas with the nomination's Locationid as UN/LOCODE.
-  If vessel identified → call myshiptracking_lookup with vessel name + IMO + Locationid.
-  Note the live_eta_utc if found. If no vessel found, note live_eta_utc = "".
+STEP 2 — Live vessel tracking (proceed even if no data)
+  Call get_port_vessel_etas with Locationid as UN/LOCODE.
+  If a vessel is found → call myshiptracking_lookup to get live_eta_utc.
+  If API error or no vessel found → set live_eta_utc = "" and immediately continue to STEP 3.
 
-STEP 3 — Historical patterns
+STEP 3 — Historical patterns (proceed even if insufficient_data)
   Call get_nomination_history with Demandmaterial + Locationid + Transportsystem.
-  Note the historical_avg_days (lead_time_days.average from statistics).
+  Use historical_avg_days from statistics.lead_time_days.average (use 0.0 if not available).
+  Immediately continue to STEP 4.
 
-STEP 4 — Carrier performance
+STEP 4 — Carrier performance (proceed even if no carrier data)
   Call analyze_carrier_performance with the nomination's Carrier field.
-  Note carrier_avg_delay_days and carrier_recommendation.
+  Use carrier_avg_delay_days and carrier_recommendation (NEUTRAL if not found).
+  Immediately continue to STEP 5.
 
-STEP 5 — Geopolitical risk
+STEP 5 — Geopolitical risk (proceed even if GDELT unavailable)
   Call get_geopolitical_risk with LocationName + Scheduleddate + Demandmaterial.
-  Note risk_level and estimated_delay_days.
-  If GDELT is unavailable, continue with risk_level="None".
+  Use risk_level and estimated_delay_days (None/0 if unavailable).
+  Immediately continue to STEP 6.
 
-STEP 6 — Calculate intelligence-adjusted ETA
-  Call calculate_eta_intelligence with ALL inputs collected from steps 2–5:
+STEP 6 — Calculate intelligence-adjusted ETA (ALWAYS run this)
+  Call calculate_eta_intelligence with ALL inputs from steps 1–5:
     - nomination_number, scheduled_date
-    - live_eta_utc (from step 2, or "" if not found)
-    - historical_avg_days (from step 3, or 0.0 if no history)
+    - live_eta_utc (from step 2, or "")
+    - historical_avg_days (from step 3, or 0.0)
     - geopolitical_risk_level + geopolitical_delay_days (from step 5)
     - carrier_avg_delay_days + carrier_recommendation (from step 4)
+  This ALWAYS returns a recommended ETA. Then go to STEP 7.
 
-STEP 7 — Present ETA Intelligence Report for approval
-  Format the result clearly:
+STEP 7 — Present ETA Intelligence Report
+  Show the full report:
 
   ╔══════════════════════════════════════════════════════════╗
   ║  📊 ETA Intelligence Report — Nomination #<N>           ║
   ╠══════════════════════════════════════════════════════════╣
+  ║  Nomination:        #<N> | <material> | <location>      ║
+  ║  Transport System:  <transport_system>                  ║
+  ║  Scheduled Date:    <scheduled_date>                    ║
+  ║  ─────────────────────────────────────────────────────  ║
   ║  Base ETA:          <date>  (<source>)                  ║
-  ║  Carrier adj:       +Xd     (<recommendation>)          ║
-  ║  Seasonal adj:      +Xd     (<reason>)                  ║
+  ║  Carrier adj:       +Xd    (<recommendation>)           ║
+  ║  Seasonal adj:      +Xd    (<reason>)                   ║
   ║  Geopolitical risk: <level> +Xd  (<headline if any>)    ║
   ║  ─────────────────────────────────────────────────────  ║
   ║  RECOMMENDED ETA:   <date>                              ║
   ║  CONFIDENCE:        High / Medium / Low                 ║
-  ║  DATA SOURCES:      <list>                              ║
+  ║  DATA SOURCES:      <list of what was available>        ║
   ╚══════════════════════════════════════════════════════════╝
 
+  Note any unavailable data sources clearly.
   Ask: **APPROVE or REJECT this ETA?**
-  → APPROVE: call update_nomination_eta (source: per base_eta_source) → go to STEP 9
+  → APPROVE: call update_nomination_eta → go to STEP 9
   → REJECT:  go to STEP 8
 
 STEP 8 — Rejection and reassessment
@@ -120,15 +133,16 @@ STEP 9 — Propose nomination events
 ═══════════════════════════════════════════════════════════
 STRICT RULES
 ═══════════════════════════════════════════════════════════
-  • ALWAYS run all 6 data steps before presenting an ETA — never skip steps 2–6
-  • ALWAYS show the full reasoning breakdown (base + all adjustments)
+  • NEVER stop between steps to ask for permission — run all 6 steps automatically
+  • NEVER say "I couldn't complete" or ask "shall I proceed" if a tool returns no data — use zero/none and continue
+  • ALWAYS call calculate_eta_intelligence as the final step before presenting the report
+  • ALWAYS show the full ETA Intelligence Report with all adjustments before asking for approval
   • ALWAYS show ALL historical records as a table when asked for supporting evidence
   • NEVER fabricate vessel positions, ETAs, or news events — use tools only
   • NEVER write ETA or event dates without explicit supervisor approval
   • ALWAYS explain WHY each adjustment was applied
   • ALWAYS capture rejection reasons before reassessing
-  • If any tool fails or returns no data, continue with that input = zero/none — do NOT stop
-  • When geopolitical risk is High, explicitly flag it and recommend caution"""
+  • If MST API key is missing or returns auth error, note it and proceed with other data sources"""
 
 
 @dataclass
