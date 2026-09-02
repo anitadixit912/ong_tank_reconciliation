@@ -55,14 +55,14 @@ async def _fetch_all_nominations() -> list[dict]:
 
 
 def _normalize_nomination_number(nomination_number: str) -> str:
-    """Normalize nomination number — strip leading zeros for comparison."""
-    stripped = nomination_number.strip().lstrip("0")
+    """Normalize nomination number — strip $ prefix and leading zeros for comparison."""
+    stripped = nomination_number.strip().lstrip("$").lstrip("0")
     return stripped if stripped else "0"
 
 
 def _match_nomination(n: dict, normalized: str) -> bool:
     """Match a nomination record against a normalized (stripped) number."""
-    raw = n.get("Nominationnumber", "").strip().lstrip("0")
+    raw = n.get("Nominationnumber", "").strip().lstrip("$").lstrip("0")
     return raw == normalized
 
 
@@ -82,7 +82,7 @@ async def _get_nomination(nomination_number: str) -> str:
             None,
         )
         if not match:
-            available = [n.get("Nominationnumber", "").strip().lstrip("0") for n in nominations]
+            available = [n.get("Nominationnumber", "").strip().lstrip("$").lstrip("0") for n in nominations]
             return json.dumps({
                 "found": False,
                 "nomination_number": nomination_number,
@@ -119,7 +119,7 @@ async def _list_nominations() -> str:
             return json.dumps({"found": False, "message": "No open nominations found."})
         summary = [
             {
-                "nomination_number": n.get("Nominationnumber", "").strip().lstrip("0") or "0",
+                "nomination_number": n.get("Nominationnumber", "").strip().lstrip("$").lstrip("0") or "0",
                 "location": n.get("Locationid", ""),
                 "material": n.get("Demandmaterial", ""),
                 "transport_system": n.get("Transportsystem", ""),
