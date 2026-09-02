@@ -3,7 +3,7 @@
 # Deploy from assets/nomination-eta-agent/ via: cf push
 applications:
   - name: nomination-eta-agent
-    memory: 128M
+    memory: 256M
     disk_quota: 1G
     instances: 1
     buildpacks:
