@@ -43,7 +43,9 @@ class AgentExecutor(A2AAgentExecutor):
             raise ServerError(error=InternalError()) from e
 
     async def _run(self, query, task, updater):
-        # Try MCP — keep session open for entire agent execution
+        # Merge MCP tools + local intelligence tools
+        tools = list(self.nomination_tools)
+
         if MCP_SERVER_URL:
             try:
                 from mcp import ClientSession
@@ -53,15 +55,18 @@ class AgentExecutor(A2AAgentExecutor):
                 async with sse_client(f"{MCP_SERVER_URL}/sse") as (read, write):
                     async with ClientSession(read, write) as session:
                         await session.initialize()
-                        tools = await load_mcp_tools(session)
-                        logger.info("Using %d MCP tool(s) from %s", len(tools), MCP_SERVER_URL)
+                        mcp_tools = await load_mcp_tools(session)
+                        # Add MCP tools that are not already in local tools
+                        local_names = {t.name for t in tools}
+                        extra = [t for t in mcp_tools if t.name not in local_names]
+                        tools = tools + extra
+                        logger.info("Using %d tool(s): %d local + %d MCP extra from %s",
+                                    len(tools), len(self.nomination_tools), len(extra), MCP_SERVER_URL)
                         await self._stream(query, task, updater, tools)
                         return
             except Exception as e:
-                logger.warning("MCP unavailable (%s) — falling back to direct tools", e)
+                logger.warning("MCP unavailable (%s) — using direct tools only", e)
 
-        # Fallback: direct tools
-        tools = list(self.nomination_tools)
         logger.info("Using %d direct tool(s)", len(tools))
         await self._stream(query, task, updater, tools)
 
