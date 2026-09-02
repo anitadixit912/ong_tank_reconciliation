@@ -852,18 +852,25 @@ async def _calculate_eta_intelligence(
             confidence_note = "Downgraded to Low — high geopolitical risk introduces significant uncertainty."
         elif confidence_score >= 4:
             confidence = "High"
-            confidence_note = f"Based on {len(data_sources)} data source(s): {', '.join(data_sources)}"
+            confidence_note = f"Strong confidence — based on: {', '.join(data_sources)}"
         elif confidence_score >= 2:
             confidence = "Medium"
-            confidence_note = f"Based on {len(data_sources)} data source(s): {', '.join(data_sources)}"
+            confidence_note = f"Moderate confidence — based on: {', '.join(data_sources)}"
         else:
             confidence = "Low"
-            confidence_note = "Only scheduled date available — no live or historical data."
+            confidence_note = "Low confidence — no live vessel tracking or historical completion data available. ETA is based on the scheduled date only. Configure MST_API_KEY for live vessel tracking."
+
+        # Always show what data was used, even if only scheduled date
+        if not data_sources:
+            data_sources_display = ["SCHEDULED_DATE (only source available — no live AIS, no historical completions, no carrier history)"]
+        else:
+            data_sources_display = data_sources
 
         # Reasoning
-        reasoning_parts = [f"Base ETA {base_dt} from {base_source}."]
+        reasoning_parts = []
         if route_desc:
-            reasoning_parts.insert(0, f"Route: {route_desc}" + (f" | Material: {material}" if material else "") + (f" | Transport: {transport_system}" if transport_system else "") + ".")
+            reasoning_parts.append(f"Route: {route_desc}" + (f" | Material: {material}" if material else "") + (f" | Transport: {transport_system}" if transport_system else "") + ".")
+        reasoning_parts.append(f"Base ETA {base_dt} from {base_source}.")
         if adjustments_applied:
             reasoning_parts.append("Adjustments: " + " | ".join(adjustments_applied))
         else:
@@ -880,6 +887,11 @@ async def _calculate_eta_intelligence(
             "transport_system": transport_system,
             "base_eta": str(base_dt),
             "base_eta_source": base_source,
+            "base_eta_explanation": (
+                "Live AIS vessel position from MyShipTracking — most accurate source" if base_source == "LIVE_AIS"
+                else f"Historical average of {historical_avg_days:.1f} days added to scheduled date — based on past nominations for same material/location/transport" if base_source == "HISTORICAL_AVERAGE"
+                else "No live tracking or historical data available — using the nomination's scheduled date as-is"
+            ),
             "adjustments": {
                 "carrier_days": carrier_adj,
                 "seasonal_days": seasonal_adj,
@@ -888,7 +900,7 @@ async def _calculate_eta_intelligence(
             },
             "adjustments_applied": adjustments_applied,
             "reasoning": " ".join(reasoning_parts),
-            "data_sources_used": data_sources,
+            "data_sources_used": data_sources_display,
         }, indent=2)
 
     except Exception as e:
