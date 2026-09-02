@@ -89,30 +89,44 @@ STEP 6 — Calculate intelligence-adjusted ETA (ALWAYS run this)
     - live_eta_utc (from step 2, or "")
     - historical_avg_days (from step 3, or 0.0)
     - geopolitical_risk_level + geopolitical_delay_days (from step 5)
+    - geopolitical_headline: first relevant headline title from step 5 (or "")
     - carrier_avg_delay_days + carrier_recommendation (from step 4)
+    - carrier_name: carrier name/description from step 4 (or "")
+    - transport_system: Transportsystem from nomination (e.g. "MARINE", "BARGE_1743")
+    - origin_location: origin port/location name if known (e.g. "Ras Laffan Port")
+    - destination_location: destination location name from nomination (e.g. "USMOB")
+    - material: Demandmaterial from nomination (e.g. "BLK_GASOLINE 87")
   This ALWAYS returns a recommended ETA. Then go to STEP 7.
 
 STEP 7 — Present ETA Intelligence Report
-  Show the full report:
+  Show the full report using the adjustments_applied list from calculate_eta_intelligence:
 
   ╔══════════════════════════════════════════════════════════╗
   ║  📊 ETA Intelligence Report — Nomination #<N>           ║
   ╠══════════════════════════════════════════════════════════╣
-  ║  Nomination:        #<N> | <material> | <location>      ║
+  ║  Nomination:        #<N> | <material>                   ║
+  ║  Route:             <origin> → <destination>            ║
   ║  Transport System:  <transport_system>                  ║
   ║  Scheduled Date:    <scheduled_date>                    ║
   ║  ─────────────────────────────────────────────────────  ║
   ║  Base ETA:          <date>  (<source>)                  ║
-  ║  Carrier adj:       +Xd    (<recommendation>)           ║
-  ║  Seasonal adj:      +Xd    (<reason>)                   ║
-  ║  Geopolitical risk: <level> +Xd  (<headline if any>)    ║
+  ║                     Reason: <explain source briefly>    ║
   ║  ─────────────────────────────────────────────────────  ║
-  ║  RECOMMENDED ETA:   <date>                              ║
+  ║  Carrier adj:       <+Xd or 0d>                        ║
+  ║                     Reason: <full carrier description>  ║
+  ║  Seasonal adj:      <+Xd or 0d>                        ║
+  ║                     Reason: <full seasonal description> ║
+  ║  Geopolitical risk: <level> <+Xd or 0d>                ║
+  ║                     Reason: <route + headline or none>  ║
+  ║  ─────────────────────────────────────────────────────  ║
+  ║  RECOMMENDED ETA:   <date>  (base + total adjustment)   ║
   ║  CONFIDENCE:        High / Medium / Low                 ║
+  ║                     Reason: <confidence_note>           ║
   ║  DATA SOURCES:      <list of what was available>        ║
   ╚══════════════════════════════════════════════════════════╝
 
-  Note any unavailable data sources clearly.
+  Use the full text from adjustments_applied[] for each row's Reason.
+  If a data source was unavailable (e.g. no MST API key, no carrier history), say so explicitly.
   Ask: **APPROVE or REJECT this ETA?**
   → APPROVE: call update_nomination_eta → go to STEP 9
   → REJECT:  go to STEP 8

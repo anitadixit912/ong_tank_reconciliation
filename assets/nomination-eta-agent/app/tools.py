@@ -727,8 +727,14 @@ class CalculateETAIntelligenceInput(BaseModel):
     historical_avg_days: float = Field(default=0.0, description="Historical average lead time in days from get_nomination_history")
     geopolitical_risk_level: str = Field(default="None", description="Risk level from get_geopolitical_risk: None/Low/Medium/High")
     geopolitical_delay_days: int = Field(default=0, description="Estimated delay days from get_geopolitical_risk")
+    geopolitical_headline: str = Field(default="", description="Most relevant headline from get_geopolitical_risk if any")
     carrier_avg_delay_days: float = Field(default=0.0, description="Average carrier delay days from analyze_carrier_performance")
     carrier_recommendation: str = Field(default="NEUTRAL", description="Carrier recommendation: RELIABLE/MINOR_RISK/MODERATE_RISK/HIGH_RISK/NEUTRAL")
+    carrier_name: str = Field(default="", description="Carrier name or description from analyze_carrier_performance")
+    transport_system: str = Field(default="", description="Transport system from the nomination (e.g. MARINE, BARGE_1743)")
+    origin_location: str = Field(default="", description="Origin location name from the nomination")
+    destination_location: str = Field(default="", description="Destination location name from the nomination")
+    material: str = Field(default="", description="Material/product being shipped (e.g. BLK_GASOLINE 87)")
     current_month: int = Field(default=0, description="Current month 1-12 for seasonal adjustment (0 = auto-detect)")
 
 
@@ -739,14 +745,30 @@ async def _calculate_eta_intelligence(
     historical_avg_days: float = 0.0,
     geopolitical_risk_level: str = "None",
     geopolitical_delay_days: int = 0,
+    geopolitical_headline: str = "",
     carrier_avg_delay_days: float = 0.0,
     carrier_recommendation: str = "NEUTRAL",
+    carrier_name: str = "",
+    transport_system: str = "",
+    origin_location: str = "",
+    destination_location: str = "",
+    material: str = "",
     current_month: int = 0,
 ) -> str:
     try:
         today = datetime.utcnow().date()
         sched_dt = datetime.fromisoformat(scheduled_date).date()
         month = current_month if current_month else today.month
+
+        # Route description for context
+        route_desc = ""
+        if origin_location and destination_location:
+            route_desc = f"{origin_location} → {destination_location}"
+        elif destination_location:
+            route_desc = f"to {destination_location}"
+        elif origin_location:
+            route_desc = f"from {origin_location}"
+
         adjustments_applied = []
         data_sources = []
 
@@ -777,10 +799,14 @@ async def _calculate_eta_intelligence(
 
         # ── Stage 2: Carrier adjustment ───────────────────────────────────────
         carrier_adj = 0
+        carrier_context = carrier_name or carrier_recommendation
         if carrier_recommendation not in ("NEUTRAL", "RELIABLE") and carrier_avg_delay_days != 0:
             carrier_adj = max(-3, min(7, round(carrier_avg_delay_days)))
             if carrier_adj != 0:
-                adjustments_applied.append(f"Carrier adjustment: {'+' if carrier_adj > 0 else ''}{carrier_adj}d (avg delay: {carrier_avg_delay_days}d — {carrier_recommendation})")
+                carrier_desc = f"Carrier {carrier_context} is {carrier_recommendation.replace('_', ' ').lower()} — historically {carrier_avg_delay_days:+.1f}d vs scheduled"
+                if transport_system:
+                    carrier_desc += f" on {transport_system} routes"
+                adjustments_applied.append(f"Carrier adjustment: {'+' if carrier_adj > 0 else ''}{carrier_adj}d — {carrier_desc}")
                 data_sources.append("CARRIER_PERF")
                 confidence_score += 1
 
@@ -789,18 +815,26 @@ async def _calculate_eta_intelligence(
         if base_source != "LIVE_AIS":
             if month in (9, 10, 11):
                 seasonal_adj = 1
-                adjustments_applied.append("Seasonal buffer: +1d (Sep–Nov — US Gulf hurricane/maintenance season)")
+                route_note = f" on {route_desc}" if route_desc else ""
+                adjustments_applied.append(f"Seasonal buffer: +1d — September to November is US Gulf hurricane and maintenance season{route_note}; historical delays increase by 1–3 days")
             elif month in (1, 2, 3):
                 seasonal_adj = -1
-                adjustments_applied.append("Seasonal adjustment: -1d (Jan–Mar — historically faster)")
+                adjustments_applied.append("Seasonal adjustment: -1d — January to March is historically faster; fewer weather delays")
 
         # ── Stage 4: Geopolitical buffer ──────────────────────────────────────
         geo_map   = {"None": 0, "Low": 1, "Medium": 3, "High": 6}
         geo_adj   = max(geo_map.get(geopolitical_risk_level, 0), geopolitical_delay_days)
         if geo_adj > 0:
-            adjustments_applied.append(f"Geopolitical risk: +{geo_adj}d ({geopolitical_risk_level} risk level from GDELT news)")
+            geo_desc = f"Geopolitical risk: {geopolitical_risk_level}"
+            if route_desc:
+                geo_desc += f" near {route_desc}"
+            if geopolitical_headline:
+                geo_desc += f" — \"{geopolitical_headline}\""
+            adjustments_applied.append(f"{geo_desc} → +{geo_adj}d buffer applied")
             data_sources.append("GDELT_NEWS")
             confidence_score += 1
+        elif geopolitical_risk_level == "None":
+            adjustments_applied.append(f"Geopolitical risk: None detected{' near ' + route_desc if route_desc else ''} — no buffer needed")
 
         # ── Stage 5: Final ETA + confidence ──────────────────────────────────
         total_adj  = carrier_adj + seasonal_adj + geo_adj
@@ -828,8 +862,10 @@ async def _calculate_eta_intelligence(
 
         # Reasoning
         reasoning_parts = [f"Base ETA {base_dt} from {base_source}."]
+        if route_desc:
+            reasoning_parts.insert(0, f"Route: {route_desc}" + (f" | Material: {material}" if material else "") + (f" | Transport: {transport_system}" if transport_system else "") + ".")
         if adjustments_applied:
-            reasoning_parts.append("Adjustments applied: " + "; ".join(adjustments_applied))
+            reasoning_parts.append("Adjustments: " + " | ".join(adjustments_applied))
         else:
             reasoning_parts.append("No adjustments applied.")
         reasoning_parts.append(f"Final recommended ETA: {final_dt} (total adjustment: {'+' if total_adj >= 0 else ''}{total_adj} days).")
@@ -839,6 +875,9 @@ async def _calculate_eta_intelligence(
             "recommended_eta_date": str(final_dt),
             "confidence": confidence,
             "confidence_note": confidence_note,
+            "route": route_desc,
+            "material": material,
+            "transport_system": transport_system,
             "base_eta": str(base_dt),
             "base_eta_source": base_source,
             "adjustments": {
