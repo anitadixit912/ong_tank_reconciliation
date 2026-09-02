@@ -567,22 +567,28 @@ async def _get_geopolitical_risk(location_name: str, scheduled_date: str, materi
                 med_hits += 1
                 headlines.append({"title": a.get("title"), "url": url, "date": date, "severity": "MEDIUM"})
 
-        # Classify risk
+        # Classify risk — include date and headline in reasoning
+        top_headline = headlines[0]["title"] if headlines else ""
+        date_context = f" around {scheduled_date}" if scheduled_date else ""
         if high_hits >= 2:
             risk_level, delay_days = "High", 5
-            reasoning = f"{high_hits} high-severity events found near {location_name}. Significant disruption risk."
+            hl_text = f' Key events: {"; ".join(h["title"] for h in headlines[:2])}' if headlines else ""
+            reasoning = f"{high_hits} high-severity events detected near {location_name}{date_context}.{hl_text} Significant disruption risk — 5-day buffer applied."
         elif high_hits == 1:
             risk_level, delay_days = "Medium", 2
-            reasoning = f"1 high-severity event found near {location_name}. Monitor closely."
+            hl_text = f' Event: "{top_headline}"' if top_headline else ""
+            reasoning = f"1 high-severity event detected near {location_name}{date_context}.{hl_text} 2-day buffer applied."
         elif med_hits >= 2:
             risk_level, delay_days = "Medium", 1
-            reasoning = f"{med_hits} medium-severity events found near {location_name}. Minor disruption possible."
+            hl_text = f' Events include: "{top_headline}"' if top_headline else ""
+            reasoning = f"{med_hits} medium-severity events (disruptions/weather/incidents) near {location_name}{date_context}.{hl_text} 1-day buffer applied."
         elif med_hits == 1:
             risk_level, delay_days = "Low", 0
-            reasoning = f"1 medium-severity event found near {location_name}. Low disruption risk."
+            hl_text = f' Event: "{top_headline}"' if top_headline else ""
+            reasoning = f"1 medium-severity event near {location_name}{date_context}.{hl_text} Risk is low — no buffer needed but monitor."
         else:
             risk_level, delay_days = "None", 0
-            reasoning = f"No significant geopolitical or weather events found near {location_name}."
+            reasoning = f"GDELT news scan found no strikes, hurricanes, sanctions, explosions, closures or other disruptions near {location_name}{date_context}. Route appears clear."
 
         return json.dumps({
             "location_name": location_name,
@@ -674,19 +680,27 @@ async def _analyze_carrier_performance(carrier_code: str, transport_system: str 
         avg_delay   = round(statistics.mean(delay_list), 1)
         on_time_pct = round(len([d for d in delay_list if d <= 0]) / len(delay_list) * 100, 1)
 
+        carrier_display = filtered[0].get("CarrierDesc") or carrier_code
+        ts_context = f" on {transport_system} routes" if transport_system else ""
+        sample = f"{len(delay_list)} completed shipment{'s' if len(delay_list) != 1 else ''}"
+
         if avg_delay <= 0:
-            perf, recommendation = "RELIABLE — consistently on time or early", "RELIABLE"
+            perf = f"{carrier_display} is RELIABLE — on time or early ({sample}, avg {avg_delay:+.1f}d vs scheduled{ts_context})"
+            recommendation = "RELIABLE"
         elif avg_delay <= 2:
-            perf, recommendation = f"SLIGHTLY LATE — avg {avg_delay}d past scheduled", "MINOR_RISK"
+            perf = f"{carrier_display} is SLIGHTLY LATE — avg {avg_delay:+.1f}d past scheduled ({sample}{ts_context}). On-time rate: {on_time_pct}%"
+            recommendation = "MINOR_RISK"
         elif avg_delay <= 5:
-            perf, recommendation = f"MODERATELY LATE — avg {avg_delay}d past scheduled", "MODERATE_RISK"
+            perf = f"{carrier_display} is MODERATELY LATE — avg {avg_delay:+.1f}d past scheduled ({sample}{ts_context}). On-time rate: {on_time_pct}%"
+            recommendation = "MODERATE_RISK"
         else:
-            perf, recommendation = f"CONSISTENTLY LATE — avg {avg_delay}d past scheduled", "HIGH_RISK"
+            perf = f"{carrier_display} is CONSISTENTLY LATE — avg {avg_delay:+.1f}d past scheduled ({sample}{ts_context}). On-time rate: {on_time_pct}%"
+            recommendation = "HIGH_RISK"
 
         return json.dumps({
             "found": True,
             "carrier_code": carrier_code,
-            "carrier_name": (filtered[0].get("CarrierDesc") or carrier_code),
+            "carrier_name": carrier_display,
             "total_records": len(filtered),
             "completed_records": len(delay_list),
             "avg_delay_days": avg_delay,
@@ -800,41 +814,52 @@ async def _calculate_eta_intelligence(
         # ── Stage 2: Carrier adjustment ───────────────────────────────────────
         carrier_adj = 0
         carrier_context = carrier_name or carrier_recommendation
-        if carrier_recommendation not in ("NEUTRAL", "RELIABLE") and carrier_avg_delay_days != 0:
-            carrier_adj = max(-3, min(7, round(carrier_avg_delay_days)))
+        if carrier_recommendation in ("NEUTRAL",) and not carrier_avg_delay_days:
+            adjustments_applied.append(f"Carrier: No adjustment — no historical performance data available for carrier {carrier_context}. Neutral assumption applied.")
+        elif carrier_recommendation == "RELIABLE":
+            adjustments_applied.append(f"Carrier: No adjustment — {carrier_context} has a reliable on-time record. No buffer needed.")
+        else:
+            carrier_adj = max(-3, min(7, round(carrier_avg_delay_days))) if carrier_avg_delay_days else 0
+            ts_note = f" on {transport_system} routes" if transport_system else ""
             if carrier_adj != 0:
-                carrier_desc = f"Carrier {carrier_context} is {carrier_recommendation.replace('_', ' ').lower()} — historically {carrier_avg_delay_days:+.1f}d vs scheduled"
-                if transport_system:
-                    carrier_desc += f" on {transport_system} routes"
-                adjustments_applied.append(f"Carrier adjustment: {'+' if carrier_adj > 0 else ''}{carrier_adj}d — {carrier_desc}")
+                adjustments_applied.append(f"Carrier: {'+' if carrier_adj > 0 else ''}{carrier_adj}d — {carrier_context} ({carrier_recommendation.replace('_', ' ')}) historically averages {carrier_avg_delay_days:+.1f}d vs scheduled{ts_note}.")
                 data_sources.append("CARRIER_PERF")
                 confidence_score += 1
+            else:
+                adjustments_applied.append(f"Carrier: No adjustment — {carrier_context} data available but delay rounds to 0 days{ts_note}.")
 
-        # ── Stage 3: Seasonal adjustment (skip if live AIS available) ─────────
+        # ── Stage 3: Seasonal adjustment ─────────────────────────────────────
         seasonal_adj = 0
-        if base_source != "LIVE_AIS":
-            if month in (9, 10, 11):
-                seasonal_adj = 1
-                route_note = f" on {route_desc}" if route_desc else ""
-                adjustments_applied.append(f"Seasonal buffer: +1d — September to November is US Gulf hurricane and maintenance season{route_note}; historical delays increase by 1–3 days")
-            elif month in (1, 2, 3):
-                seasonal_adj = -1
-                adjustments_applied.append("Seasonal adjustment: -1d — January to March is historically faster; fewer weather delays")
+        month_names = {1:"January",2:"February",3:"March",4:"April",5:"May",6:"June",
+                       7:"July",8:"August",9:"September",10:"October",11:"November",12:"December"}
+        current_month_name = month_names.get(month, str(month))
+        route_note = f" on the {route_desc} route" if route_desc else ""
+
+        if base_source == "LIVE_AIS":
+            adjustments_applied.append(f"Seasonal: No adjustment — live AIS vessel position is used as base ETA, so seasonal patterns are not applied (AIS already reflects actual vessel speed and conditions).")
+        elif month in (9, 10, 11):
+            seasonal_adj = 1
+            adjustments_applied.append(f"Seasonal: +1d — {current_month_name} falls in the US Gulf hurricane and maintenance season (Sep–Nov){route_note}. Historical data shows 1–3 day delays are common during this period due to weather routing and port maintenance windows.")
+        elif month in (1, 2, 3):
+            seasonal_adj = -1
+            adjustments_applied.append(f"Seasonal: -1d — {current_month_name} is historically one of the faster months{route_note}. Fewer weather events and lower port congestion typically shorten transit times by 1 day.")
+        else:
+            adjustments_applied.append(f"Seasonal: No adjustment — {current_month_name} has no significant seasonal pattern for this route. No buffer applied.")
 
         # ── Stage 4: Geopolitical buffer ──────────────────────────────────────
-        geo_map   = {"None": 0, "Low": 1, "Medium": 3, "High": 6}
-        geo_adj   = max(geo_map.get(geopolitical_risk_level, 0), geopolitical_delay_days)
-        if geo_adj > 0:
-            geo_desc = f"Geopolitical risk: {geopolitical_risk_level}"
-            if route_desc:
-                geo_desc += f" near {route_desc}"
-            if geopolitical_headline:
-                geo_desc += f" — \"{geopolitical_headline}\""
-            adjustments_applied.append(f"{geo_desc} → +{geo_adj}d buffer applied")
+        geo_map = {"None": 0, "Low": 1, "Medium": 3, "High": 6}
+        geo_adj  = max(geo_map.get(geopolitical_risk_level, 0), geopolitical_delay_days)
+        geo_route = f" near {route_desc}" if route_desc else f" near {destination_location}" if destination_location else ""
+
+        if geopolitical_risk_level == "None":
+            adjustments_applied.append(f"Geopolitical: No buffer — GDELT global news scan{geo_route} found no strikes, hurricanes, sanctions, closures, or other disruptions around {scheduled_date}. Route appears clear.")
+        elif geo_adj > 0:
+            hl_note = f' Triggered by: "{geopolitical_headline}"' if geopolitical_headline else ""
+            adjustments_applied.append(f"Geopolitical: +{geo_adj}d — Risk level {geopolitical_risk_level}{geo_route} detected from GDELT news scan.{hl_note} Buffer added to account for potential delays.")
             data_sources.append("GDELT_NEWS")
             confidence_score += 1
-        elif geopolitical_risk_level == "None":
-            adjustments_applied.append(f"Geopolitical risk: None detected{' near ' + route_desc if route_desc else ''} — no buffer needed")
+        else:
+            adjustments_applied.append(f"Geopolitical: Risk level {geopolitical_risk_level} detected{geo_route} but estimated impact is negligible — no buffer applied.")
 
         # ── Stage 5: Final ETA + confidence ──────────────────────────────────
         total_adj  = carrier_adj + seasonal_adj + geo_adj
