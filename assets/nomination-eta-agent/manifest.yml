@@ -8,8 +8,8 @@ applications:
     instances: 1
     buildpacks:
       - python_buildpack
-    command: gunicorn --worker-class uvicorn.workers.UvicornWorker --workers 1 --bind 0.0.0.0:${PORT} --chdir app main:application
-    timeout: 180
+    command: gunicorn --worker-class uvicorn.workers.UvicornWorker --workers 1 --bind 0.0.0.0:${PORT} --chdir app --timeout 300 --keep-alive 300 main:application
+    timeout: 300
     health-check-type: http
     health-check-http-endpoint: /.well-known/agent.json
     services:
