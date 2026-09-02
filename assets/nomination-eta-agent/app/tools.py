@@ -18,7 +18,7 @@ import logging
 import os
 import statistics
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 import httpx
@@ -501,6 +501,387 @@ myshiptracking_lookup = StructuredTool(
 )
 
 
+# ── Tool: get_geopolitical_risk ───────────────────────────────────────────────
+
+_GDELT_BASE = "https://api.gdeltproject.org/api/v2/doc/doc"
+_GDELT_TIMEOUT = 15.0
+
+_HIGH_RISK_KEYWORDS  = {"strike", "hurricane", "explosion", "fire", "spill", "flood",
+                        "blockade", "sanctions", "attack", "closed", "shutdown", "storm",
+                        "embargo", "protest", "piracy", "conflict", "war", "crisis"}
+_MEDIUM_RISK_KEYWORDS = {"disruption", "delay", "warning", "alert", "weather", "accident",
+                         "incident", "maintenance", "congestion", "closure", "inspection",
+                         "investigation", "slowdown"}
+
+
+class GetGeopoliticalRiskInput(BaseModel):
+    location_name: str = Field(description="Human-readable location/port name (e.g. 'Mobile Alabama')")
+    scheduled_date: str = Field(description="Scheduled date YYYY-MM-DD — centres the search window")
+    material: str = Field(default="", description="Material/product type for keyword enrichment (e.g. 'BLK_GASOLINE 87')")
+
+
+async def _get_geopolitical_risk(location_name: str, scheduled_date: str, material: str = "") -> str:
+    try:
+        # Build query keywords
+        base_keywords = [location_name, "port", "oil", "petroleum", "shipping", "vessel"]
+        if material:
+            mat_lower = material.lower()
+            if "crude" in mat_lower:   base_keywords.append("crude oil")
+            if "diesel" in mat_lower:  base_keywords.append("diesel")
+            if "gas" in mat_lower:     base_keywords.append("gasoline")
+            if "fuel" in mat_lower:    base_keywords.append("fuel")
+        query = " ".join(base_keywords)
+
+        async with httpx.AsyncClient(timeout=_GDELT_TIMEOUT) as client:
+            resp = await client.get(_GDELT_BASE, params={
+                "query": query, "mode": "artlist", "format": "json",
+                "timespan": "30d", "maxrecords": "10"
+            })
+
+        # GDELT returns plain text / HTML on rate-limit — detect gracefully
+        content_type = resp.headers.get("content-type", "")
+        if "json" not in content_type or resp.status_code != 200:
+            return json.dumps({
+                "risk_level": "None", "estimated_delay_days": 0,
+                "relevant_headlines": [], "articles_analysed": 0,
+                "reasoning": "GDELT unavailable or rate-limited — no geo risk data applied.",
+                "source": "GDELT Project v2 DOC API"
+            })
+
+        data     = resp.json()
+        articles = data.get("articles", [])
+        headlines = []
+        high_hits = 0
+        med_hits  = 0
+
+        for a in articles:
+            title = (a.get("title") or "").lower()
+            url   = a.get("url", "")
+            date  = a.get("seendate", "")
+            high_match = any(kw in title for kw in _HIGH_RISK_KEYWORDS)
+            med_match  = any(kw in title for kw in _MEDIUM_RISK_KEYWORDS)
+            if high_match:
+                high_hits += 1
+                headlines.append({"title": a.get("title"), "url": url, "date": date, "severity": "HIGH"})
+            elif med_match:
+                med_hits += 1
+                headlines.append({"title": a.get("title"), "url": url, "date": date, "severity": "MEDIUM"})
+
+        # Classify risk
+        if high_hits >= 2:
+            risk_level, delay_days = "High", 5
+            reasoning = f"{high_hits} high-severity events found near {location_name}. Significant disruption risk."
+        elif high_hits == 1:
+            risk_level, delay_days = "Medium", 2
+            reasoning = f"1 high-severity event found near {location_name}. Monitor closely."
+        elif med_hits >= 2:
+            risk_level, delay_days = "Medium", 1
+            reasoning = f"{med_hits} medium-severity events found near {location_name}. Minor disruption possible."
+        elif med_hits == 1:
+            risk_level, delay_days = "Low", 0
+            reasoning = f"1 medium-severity event found near {location_name}. Low disruption risk."
+        else:
+            risk_level, delay_days = "None", 0
+            reasoning = f"No significant geopolitical or weather events found near {location_name}."
+
+        return json.dumps({
+            "location_name": location_name,
+            "scheduled_date": scheduled_date,
+            "risk_level": risk_level,
+            "estimated_delay_days": delay_days,
+            "relevant_headlines": headlines[:5],
+            "articles_analysed": len(articles),
+            "reasoning": reasoning,
+            "source": "GDELT Project v2 DOC API (free)"
+        }, indent=2)
+
+    except Exception as e:
+        return json.dumps({
+            "risk_level": "None", "estimated_delay_days": 0,
+            "relevant_headlines": [], "articles_analysed": 0,
+            "reasoning": f"GDELT query failed: {e} — no geo risk data applied.",
+            "source": "GDELT Project v2 DOC API"
+        })
+
+
+get_geopolitical_risk = StructuredTool(
+    name="get_geopolitical_risk",
+    description=(
+        "Query GDELT free news database for geopolitical events, weather disruptions, strikes, "
+        "or other risks near a port location around the nomination's scheduled date. "
+        "Returns risk level (High/Medium/Low/None), estimated delay days, and relevant headlines. "
+        "Always call this before proposing a final ETA — use LocationName and Scheduleddate from the nomination."
+    ),
+    args_schema=GetGeopoliticalRiskInput,
+    coroutine=_get_geopolitical_risk,
+    handle_tool_error=True,
+)
+
+
+# ── Tool: analyze_carrier_performance ────────────────────────────────────────
+
+class AnalyzeCarrierPerformanceInput(BaseModel):
+    carrier_code: str = Field(description="Carrier code from the nomination Carrier field (e.g. '17106710')")
+    transport_system: str = Field(default="", description="Optional: filter to specific transport system")
+
+
+async def _analyze_carrier_performance(carrier_code: str, transport_system: str = "") -> str:
+    try:
+        nominations = await _fetch_all_nominations()
+
+        # Filter by carrier
+        filtered = [
+            n for n in nominations
+            if str(n.get("Carrier", "")).strip() == carrier_code.strip()
+        ]
+        if transport_system:
+            filtered = [n for n in filtered if n.get("Transportsystem", "").strip() == transport_system.strip()]
+
+        if not filtered:
+            return json.dumps({
+                "found": False,
+                "carrier_code": carrier_code,
+                "message": "No historical data for this carrier — proceed with neutral adjustment.",
+                "recommendation": "NEUTRAL",
+                "avg_delay_days": 0.0
+            })
+
+        # Compute delays for completed nominations only
+        delay_list = []
+        for n in filtered:
+            scheduled = n.get("Scheduleddate") or n.get("scheduledDate")
+            completed = n.get("completedAt")
+            if scheduled and completed:
+                try:
+                    sched = datetime.fromisoformat(scheduled)
+                    comp  = datetime.fromisoformat(completed)
+                    delay_list.append((comp - sched).days)
+                except Exception:
+                    pass
+
+        if not delay_list:
+            return json.dumps({
+                "found": True,
+                "carrier_code": carrier_code,
+                "carrier_name": (filtered[0].get("CarrierDesc") or carrier_code),
+                "total_records": len(filtered),
+                "completed_records": 0,
+                "message": "No completed nominations found for this carrier — all are open/in-progress. Proceed neutral.",
+                "recommendation": "NEUTRAL",
+                "avg_delay_days": 0.0
+            })
+
+        avg_delay   = round(statistics.mean(delay_list), 1)
+        on_time_pct = round(len([d for d in delay_list if d <= 0]) / len(delay_list) * 100, 1)
+
+        if avg_delay <= 0:
+            perf, recommendation = "RELIABLE — consistently on time or early", "RELIABLE"
+        elif avg_delay <= 2:
+            perf, recommendation = f"SLIGHTLY LATE — avg {avg_delay}d past scheduled", "MINOR_RISK"
+        elif avg_delay <= 5:
+            perf, recommendation = f"MODERATELY LATE — avg {avg_delay}d past scheduled", "MODERATE_RISK"
+        else:
+            perf, recommendation = f"CONSISTENTLY LATE — avg {avg_delay}d past scheduled", "HIGH_RISK"
+
+        return json.dumps({
+            "found": True,
+            "carrier_code": carrier_code,
+            "carrier_name": (filtered[0].get("CarrierDesc") or carrier_code),
+            "total_records": len(filtered),
+            "completed_records": len(delay_list),
+            "avg_delay_days": avg_delay,
+            "on_time_pct": on_time_pct,
+            "performance_summary": perf,
+            "recommendation": recommendation,
+        }, indent=2)
+
+    except Exception as e:
+        return json.dumps({
+            "found": False, "carrier_code": carrier_code,
+            "recommendation": "NEUTRAL", "avg_delay_days": 0.0,
+            "message": f"Carrier analysis failed: {e} — proceeding neutral."
+        })
+
+
+analyze_carrier_performance = StructuredTool(
+    name="analyze_carrier_performance",
+    description=(
+        "Analyse historical performance of a carrier from past nominations. "
+        "Returns average delay vs scheduled date, on-time percentage, and a recommendation "
+        "(RELIABLE / MINOR_RISK / MODERATE_RISK / HIGH_RISK). "
+        "Use the nomination's Carrier field as carrier_code. "
+        "Always call this before proposing a final ETA."
+    ),
+    args_schema=AnalyzeCarrierPerformanceInput,
+    coroutine=_analyze_carrier_performance,
+    handle_tool_error=True,
+)
+
+
+# ── Tool: calculate_eta_intelligence ─────────────────────────────────────────
+
+class CalculateETAIntelligenceInput(BaseModel):
+    nomination_number: str = Field(description="Nomination number being assessed")
+    scheduled_date: str = Field(description="Nomination scheduled date YYYY-MM-DD")
+    live_eta_utc: str = Field(default="", description="Live AIS ETA from MyShipTracking in UTC (ISO format). Leave empty if not available.")
+    historical_avg_days: float = Field(default=0.0, description="Historical average lead time in days from get_nomination_history")
+    geopolitical_risk_level: str = Field(default="None", description="Risk level from get_geopolitical_risk: None/Low/Medium/High")
+    geopolitical_delay_days: int = Field(default=0, description="Estimated delay days from get_geopolitical_risk")
+    carrier_avg_delay_days: float = Field(default=0.0, description="Average carrier delay days from analyze_carrier_performance")
+    carrier_recommendation: str = Field(default="NEUTRAL", description="Carrier recommendation: RELIABLE/MINOR_RISK/MODERATE_RISK/HIGH_RISK/NEUTRAL")
+    current_month: int = Field(default=0, description="Current month 1-12 for seasonal adjustment (0 = auto-detect)")
+
+
+async def _calculate_eta_intelligence(
+    nomination_number: str,
+    scheduled_date: str,
+    live_eta_utc: str = "",
+    historical_avg_days: float = 0.0,
+    geopolitical_risk_level: str = "None",
+    geopolitical_delay_days: int = 0,
+    carrier_avg_delay_days: float = 0.0,
+    carrier_recommendation: str = "NEUTRAL",
+    current_month: int = 0,
+) -> str:
+    try:
+        today = datetime.utcnow().date()
+        sched_dt = datetime.fromisoformat(scheduled_date).date()
+        month = current_month if current_month else today.month
+        adjustments_applied = []
+        data_sources = []
+
+        # ── Stage 1: Base ETA ─────────────────────────────────────────────────
+        base_dt = None
+        base_source = "SCHEDULED_DATE_ONLY"
+        confidence_score = 0
+
+        if live_eta_utc:
+            try:
+                base_dt = datetime.fromisoformat(live_eta_utc.replace("Z", "+00:00")).date()
+                base_source = "LIVE_AIS"
+                confidence_score += 3
+                data_sources.append("LIVE_AIS")
+            except Exception:
+                pass
+
+        if base_dt is None and historical_avg_days > 0:
+            base_dt = sched_dt + timedelta(days=round(historical_avg_days))
+            base_source = "HISTORICAL_AVERAGE"
+            confidence_score += 2
+            data_sources.append("HISTORICAL_AVG")
+
+        if base_dt is None:
+            base_dt = sched_dt
+            base_source = "SCHEDULED_DATE_ONLY"
+            confidence_score += 1
+
+        # ── Stage 2: Carrier adjustment ───────────────────────────────────────
+        carrier_adj = 0
+        if carrier_recommendation not in ("NEUTRAL", "RELIABLE") and carrier_avg_delay_days != 0:
+            carrier_adj = max(-3, min(7, round(carrier_avg_delay_days)))
+            if carrier_adj != 0:
+                adjustments_applied.append(f"Carrier adjustment: {'+' if carrier_adj > 0 else ''}{carrier_adj}d (avg delay: {carrier_avg_delay_days}d — {carrier_recommendation})")
+                data_sources.append("CARRIER_PERF")
+                confidence_score += 1
+
+        # ── Stage 3: Seasonal adjustment (skip if live AIS available) ─────────
+        seasonal_adj = 0
+        if base_source != "LIVE_AIS":
+            if month in (9, 10, 11):
+                seasonal_adj = 1
+                adjustments_applied.append("Seasonal buffer: +1d (Sep–Nov — US Gulf hurricane/maintenance season)")
+            elif month in (1, 2, 3):
+                seasonal_adj = -1
+                adjustments_applied.append("Seasonal adjustment: -1d (Jan–Mar — historically faster)")
+
+        # ── Stage 4: Geopolitical buffer ──────────────────────────────────────
+        geo_map   = {"None": 0, "Low": 1, "Medium": 3, "High": 6}
+        geo_adj   = max(geo_map.get(geopolitical_risk_level, 0), geopolitical_delay_days)
+        if geo_adj > 0:
+            adjustments_applied.append(f"Geopolitical risk: +{geo_adj}d ({geopolitical_risk_level} risk level from GDELT news)")
+            data_sources.append("GDELT_NEWS")
+            confidence_score += 1
+
+        # ── Stage 5: Final ETA + confidence ──────────────────────────────────
+        total_adj  = carrier_adj + seasonal_adj + geo_adj
+        total_adj  = max(-5, min(14, total_adj))   # safety cap
+        final_dt   = base_dt + timedelta(days=total_adj)
+
+        # Never return a past date
+        if final_dt < today:
+            final_dt = today
+            adjustments_applied.append("Note: calculated date was in the past — advanced to today.")
+
+        # Confidence
+        if geopolitical_risk_level == "High":
+            confidence = "Low"
+            confidence_note = "Downgraded to Low — high geopolitical risk introduces significant uncertainty."
+        elif confidence_score >= 4:
+            confidence = "High"
+            confidence_note = f"Based on {len(data_sources)} data source(s): {', '.join(data_sources)}"
+        elif confidence_score >= 2:
+            confidence = "Medium"
+            confidence_note = f"Based on {len(data_sources)} data source(s): {', '.join(data_sources)}"
+        else:
+            confidence = "Low"
+            confidence_note = "Only scheduled date available — no live or historical data."
+
+        # Reasoning
+        reasoning_parts = [f"Base ETA {base_dt} from {base_source}."]
+        if adjustments_applied:
+            reasoning_parts.append("Adjustments applied: " + "; ".join(adjustments_applied))
+        else:
+            reasoning_parts.append("No adjustments applied.")
+        reasoning_parts.append(f"Final recommended ETA: {final_dt} (total adjustment: {'+' if total_adj >= 0 else ''}{total_adj} days).")
+
+        return json.dumps({
+            "nomination_number": nomination_number,
+            "recommended_eta_date": str(final_dt),
+            "confidence": confidence,
+            "confidence_note": confidence_note,
+            "base_eta": str(base_dt),
+            "base_eta_source": base_source,
+            "adjustments": {
+                "carrier_days": carrier_adj,
+                "seasonal_days": seasonal_adj,
+                "geopolitical_days": geo_adj,
+                "total_days": total_adj,
+            },
+            "adjustments_applied": adjustments_applied,
+            "reasoning": " ".join(reasoning_parts),
+            "data_sources_used": data_sources,
+        }, indent=2)
+
+    except Exception as e:
+        return json.dumps({
+            "nomination_number": nomination_number,
+            "recommended_eta_date": scheduled_date,
+            "confidence": "Low",
+            "confidence_note": f"Calculation error: {e} — falling back to scheduled date.",
+            "base_eta": scheduled_date,
+            "base_eta_source": "SCHEDULED_DATE_ONLY",
+            "adjustments": {"carrier_days": 0, "seasonal_days": 0, "geopolitical_days": 0, "total_days": 0},
+            "adjustments_applied": [],
+            "reasoning": f"Error in ETA calculation: {e}",
+            "data_sources_used": [],
+        })
+
+
+calculate_eta_intelligence = StructuredTool(
+    name="calculate_eta_intelligence",
+    description=(
+        "Combine live AIS ETA, historical patterns, carrier performance, and geopolitical risk "
+        "into a single risk-adjusted ETA recommendation with confidence score and full reasoning. "
+        "ALWAYS call this as the final step before presenting an ETA to the supervisor. "
+        "Pass in results from get_port_vessel_etas/myshiptracking_lookup, get_nomination_history, "
+        "analyze_carrier_performance, and get_geopolitical_risk."
+    ),
+    args_schema=CalculateETAIntelligenceInput,
+    coroutine=_calculate_eta_intelligence,
+    handle_tool_error=True,
+)
+
+
 # ── Tool 7: update_nomination_eta ─────────────────────────────────────────────
 
 class UpdateNominationETAInput(BaseModel):
@@ -696,6 +1077,9 @@ def get_nomination_eta_tools() -> list[StructuredTool]:
         myshiptracking_lookup,
         get_nomination_history,
         get_nomination_history_deep,
+        get_geopolitical_risk,
+        analyze_carrier_performance,
+        calculate_eta_intelligence,
         record_rejection_reason,
         update_nomination_eta,
         update_nomination_events,
