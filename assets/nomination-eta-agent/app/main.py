@@ -8,6 +8,7 @@ if os.environ.get("JOULE_RUNTIME"):
 
 import asyncio
 import logging
+from contextlib import asynccontextmanager
 
 import click
 import uvicorn
@@ -16,7 +17,6 @@ from a2a.server.request_handlers import DefaultRequestHandler
 from a2a.server.tasks import InMemoryTaskStore
 from a2a.types import AgentCapabilities, AgentCard, AgentSkill
 from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.requests import Request
 from opentelemetry.instrumentation.starlette import StarletteInstrumentor
 
 from agent_executor import AgentExecutor
@@ -33,22 +33,12 @@ _BEARER_PREFIX_LEN = len("bearer ")
 class JWTContextMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request, call_next):
         auth_header = request.headers.get("authorization", "")
-        token = None
         if auth_header.lower().startswith("bearer "):
-            token = auth_header[_BEARER_PREFIX_LEN:]
-        try:
-            response = await call_next(request)
-            return response
-        finally:
-            pass
-
-
-# Global agent executor — pre-warmed on startup
-_agent_executor: AgentExecutor | None = None
+            pass  # token available if needed
+        return await call_next(request)
 
 
 def _build_app():
-    global _agent_executor
     _agent_executor = AgentExecutor()
 
     _skill = AgentSkill(
@@ -84,15 +74,31 @@ def _build_app():
     _app.add_middleware(JWTContextMiddleware)
     StarletteInstrumentor().instrument_app(_app)
 
-    # Pre-warm the LLM on startup so first real request doesn't pay cold start cost
-    @_app.on_event("startup")
-    async def _warmup():
+    # Pre-warm LLM using a background task on first request instead of on_event
+    # (Starlette 2.x removed on_event)
+    _warmed = False
+
+    async def _warmup_once():
+        nonlocal _warmed
+        if _warmed:
+            return
+        _warmed = True
         try:
             logger.info("Pre-warming LLM connection...")
             await _agent_executor.agent._get_llm()
             logger.info("LLM pre-warm complete.")
         except Exception as e:
             logger.warning(f"LLM pre-warm failed (non-fatal): {e}")
+
+    # Patch the app to run warmup on first request
+    original_call = _app.__class__.__call__
+
+    async def _warmup_middleware(app_self, scope, receive, send):
+        if scope["type"] == "http":
+            asyncio.ensure_future(_warmup_once())
+        await original_call(app_self, scope, receive, send)
+
+    _app.__class__.__call__ = _warmup_middleware
 
     return _app
 
