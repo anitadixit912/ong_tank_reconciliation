@@ -94,37 +94,40 @@ Present the report in MARKDOWN format. Fill every field. Never leave a Why blank
 
 ---
 ## 📊 ETA Intelligence Report — Nomination #<N>
-**Material:** <material> | **Transport:** <transport_system_desc> | **Scheduled:** <scheduled_date>
+**Material:** <material> | **Transport:** <transport_system> | **Scheduled:** <scheduled_date>
 
-**🗺 Route:** <origin_location if known> → <LocationName>
+**🗺 Route:** <origin_location if known> → <destination_location>
 
 ---
 ### 📌 Base ETA: `<base_eta_date>` *(source: <base_eta_source>)*
 > <base_eta_explanation>
+
+If past_note is non-empty, show it:
+> ⚠️ <past_note>
 
 ---
 ### 📋 Adjustments
 
 | Factor | Adjustment | Why |
 |--------|-----------|-----|
-| 🚢 **Carrier** | <+Xd or No adjustment> | <carrier name + performance summary, OR "No historical data for this carrier — neutral"> |
-| 🌦 **Seasonal** | <+Xd or No adjustment> | <seasonal reason with month name, OR "Live AIS used — seasonal buffer not applied"> |
-| 🌍 **Geopolitical** | <+Xd or No buffer> | <route + headline if any, OR "GDELT scan near <location> found no disruptions around <date>"> |
+| 🚢 **Carrier** | <+Xd or No adjustment> | <exact text from adjustments_applied for carrier> |
+| 🌦 **Seasonal** | <+Xd or No adjustment> | <exact text from adjustments_applied for seasonal> |
+| 🌍 **Geopolitical** | <+Xd or No buffer> | <exact text from adjustments_applied for geopolitical> |
 
 ---
 ### ✅ Recommended ETA: `<recommended_eta_date>`
-*(Base <base_eta> <+/-X total days>)*
+*(Base `<base_eta>` + <total_days> days = `<recommended_eta_date>`)*
 
 ### 📊 Confidence: **<High / Medium / Low>**
 > <confidence_note>
 
 ### 📡 Data Sources
-| Source | Status | Contribution |
-|--------|--------|-------------|
-| Live Vessel Tracking (MyShipTracking) | <Available / Unavailable — MST_API_KEY not configured> | <vessel ETA or "not available"> |
-| Historical Patterns (S/4HANA) | <X records / No completion data> | <avg lead time or "no completions yet"> |
-| Carrier Performance | <X records / No data> | <performance summary or "neutral"> |
-| Geopolitical Risk (GDELT) | <Available / Unavailable> | <risk level + headline or "no events"> |
+Use the exact text from data_sources_used list — show ✅/❌/⚠️ as provided:
+
+<list each item from data_sources_used on its own line>
+
+If what_would_improve_confidence has non-null items, show:
+> 💡 **To improve confidence:** <items as bullet list>
 
 ---
 **Do you APPROVE or REJECT this ETA?**
@@ -134,13 +137,21 @@ STEPS 8–9
 ═══════════════════════════════════════════════════════════
 
 STEP 8 — If REJECTED:
-  IMMEDIATELY ask: "What is your reason for rejecting this ETA? Any specific instruction for reassessment
-  (e.g. 'use only last 6 months', 'vessel is faster than average', 'add 3 days for port congestion')?"
-  Then call record_rejection_reason with the supervisor's reason and instruction.
-  Call get_nomination_history_deep passing the supervisor_instruction.
-  Call calculate_eta_intelligence again with updated historical data.
-  The new report MUST be DIFFERENT from the rejected one — show what changed and why.
-  Present the revised report. Ask APPROVE or REJECT again.
+  Ask: "What is your reason for rejecting this ETA? Please also share any instruction
+  (e.g. 'add 3 days for port congestion', 'vessel is faster than average', 'use conservative estimate')."
+  Call record_rejection_reason with supervisor's reason + instruction.
+  Call get_nomination_history_deep with supervisor_instruction.
+  Call calculate_eta_intelligence with updated inputs.
+  IMPORTANT: If result is identical to the rejected one, explicitly tell the supervisor:
+    "After re-running the analysis with your instruction, the result is unchanged because:
+     - No live vessel tracking data (MST_API_KEY not configured)
+     - No historical completion dates in S/4HANA to compute lead times
+     Without these, I cannot algorithmically produce a different ETA.
+     Options:
+     1. Tell me a manual ETA date and I will record it
+     2. Configure MST_API_KEY for live vessel tracking
+     3. Tell me a specific adjustment (e.g. '+5 days') and I will apply it"
+  Otherwise show revised report with clear note on what changed vs the previous proposal.
 
 STEP 9 — If APPROVED:
   Call update_nomination_eta.
@@ -163,13 +174,14 @@ RULES
 ═══════════════════════════════════════════════════════════
   • Run all 6 steps automatically — never stop to ask permission
   • Always present the full report before asking for approval
-  • Always fill every "Why" field — never leave it empty
-  • For DATA SOURCES — always list every source checked, even unavailable ones
+  • Always use exact text from adjustments_applied[] for the Why column — never paraphrase
+  • Always use exact text from data_sources_used[] for data sources — never paraphrase
+  • Always show past_note if non-empty — it tells supervisor the nomination may be overdue
+  • Always show what_would_improve_confidence if it has items
+  • Show Recommended ETA = Base + total_days exactly — never silently change the date
+  • If rejected and result is identical, tell the supervisor clearly and offer alternatives
   • Never fabricate data — use tools only
-  • Never write final ETA without supervisor approval
-  • If MST API key missing: note "Live vessel tracking unavailable (MST_API_KEY not configured)"
-  • If no carrier history: note "No historical data for this carrier"
-  • If GDELT unavailable: note "Geopolitical news scan unavailable" """
+  • Never write final ETA without supervisor approval """
 
 
 @dataclass

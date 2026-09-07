@@ -873,10 +873,11 @@ async def _calculate_eta_intelligence(
         total_adj  = max(-5, min(14, total_adj))   # safety cap
         final_dt   = base_dt + timedelta(days=total_adj)
 
-        # Never return a past date
+        # If the final date is in the past, keep it but note it — don't silently change it
+        # The agent should be transparent about what the data says
+        past_note = ""
         if final_dt < today:
-            final_dt = today
-            adjustments_applied.append("Note: calculated date was in the past — advanced to today.")
+            past_note = f"Note: calculated ETA {final_dt} is in the past (scheduled date was {scheduled_date}). This nomination may already be completed or overdue."
 
         # Confidence
         if geopolitical_risk_level == "High":
@@ -935,6 +936,7 @@ async def _calculate_eta_intelligence(
         return json.dumps({
             "nomination_number": nomination_number,
             "recommended_eta_date": str(final_dt),
+            "past_note": past_note,
             "confidence": confidence,
             "confidence_note": confidence_note,
             "route": route_desc,
@@ -954,8 +956,11 @@ async def _calculate_eta_intelligence(
                 "total_days": total_adj,
             },
             "adjustments_applied": adjustments_applied,
-            "reasoning": " ".join(reasoning_parts),
             "data_sources_used": data_sources_display,
+            "what_would_improve_confidence": [
+                "Configure MST_API_KEY for live AIS vessel tracking" if "LIVE_AIS" not in data_sources else None,
+                "Add completion dates to nominations in S/4HANA to enable historical lead time analysis" if "HISTORICAL_AVG" not in data_sources else None,
+            ],
         }, indent=2)
 
     except Exception as e:
