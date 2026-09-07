@@ -163,15 +163,20 @@ STEP 8 — If REJECTED or asked for alternatives:
 
 STEP 9 — If APPROVED:
   Call update_nomination_eta.
-  Call get_nomination_history to propose event dates.
+  Use proposed_events from calculate_eta_intelligence result directly:
+    - Loading = proposed_events.loading_date
+    - Berthing = proposed_events.berthing_date (= recommended ETA)
+    - Discharge = proposed_events.discharge_date (berthing + 1 day)
+    - Departure = proposed_events.departure_date (discharge + 1 day)
+
   Show as markdown table:
 
   | Event | Proposed Date | Why | Confidence |
   |-------|--------------|-----|-----------|
-  | Loading | YYYY-MM-DD | <reasoning> | High/Medium/Low |
-  | Discharge | YYYY-MM-DD | <reasoning> | High/Medium/Low |
-  | Berthing | YYYY-MM-DD | <reasoning> | High/Medium/Low |
-  | Departure | YYYY-MM-DD | <reasoning> | High/Medium/Low |
+  | Loading | <loading_date> | Vessel departs origin ~<transit_days> days before ETA to arrive on time | Low |
+  | Berthing | <berthing_date> | Vessel arrives and berths at destination port = recommended ETA | Low |
+  | Discharge | <discharge_date> | Cargo unloading — 1 day after berthing | Low |
+  | Departure | <departure_date> | Vessel departs after discharge — 1 day after discharge | Low |
 
   **Do you APPROVE or REJECT these event dates?**
   → APPROVE: call update_nomination_events → done.

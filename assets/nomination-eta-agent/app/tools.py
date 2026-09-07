@@ -933,6 +933,15 @@ async def _calculate_eta_intelligence(
             reasoning_parts.append("No adjustments applied.")
         reasoning_parts.append(f"Final recommended ETA: {final_dt} (total adjustment: {'+' if total_adj >= 0 else ''}{total_adj} days).")
 
+        # Propose event dates — strictly sequenced Loading < Berthing < Discharge < Departure
+        transit_days  = round(historical_avg_days) if historical_avg_days > 0 else 3
+        loading_dt    = final_dt - timedelta(days=transit_days)
+        if loading_dt < today:
+            loading_dt = today
+        berthing_dt   = final_dt
+        discharge_dt  = final_dt + timedelta(days=1)
+        departure_dt  = final_dt + timedelta(days=2)
+
         return json.dumps({
             "nomination_number": nomination_number,
             "recommended_eta_date": str(final_dt),
@@ -956,10 +965,19 @@ async def _calculate_eta_intelligence(
                 "total_days": total_adj,
             },
             "adjustments_applied": adjustments_applied,
+            "proposed_events": {
+                "loading_date":          str(loading_dt),
+                "berthing_date":         str(berthing_dt),
+                "discharge_date":        str(discharge_dt),
+                "departure_date":        str(departure_dt),
+                "transit_days_assumed":  transit_days,
+            },
             "data_sources_used": data_sources_display,
             "what_would_improve_confidence": [
-                "Configure MST_API_KEY for live AIS vessel tracking" if "LIVE_AIS" not in data_sources else None,
-                "Add completion dates to nominations in S/4HANA to enable historical lead time analysis" if "HISTORICAL_AVG" not in data_sources else None,
+                x for x in [
+                    "Configure MST_API_KEY for live AIS vessel tracking" if "LIVE_AIS" not in data_sources else None,
+                    "Add completion dates to nominations in S/4HANA to enable historical lead time analysis" if "HISTORICAL_AVG" not in data_sources else None,
+                ] if x
             ],
         }, indent=2)
 
