@@ -122,9 +122,7 @@ If past_note is non-empty, show it:
 > <confidence_note>
 
 ### 📡 Data Sources
-Use the exact text from data_sources_used list — show ✅/❌/⚠️ as provided:
-
-<list each item from data_sources_used on its own line>
+(list each item from data_sources_used on its own line, exactly as returned by the tool)
 
 If what_would_improve_confidence has non-null items, show:
 > 💡 **To improve confidence:** <items as bullet list>

@@ -6,6 +6,7 @@ if os.environ.get("JOULE_RUNTIME"):
     set_aicore_config()
     auto_instrument()
 
+import asyncio
 import logging
 
 import click
@@ -15,6 +16,7 @@ from a2a.server.request_handlers import DefaultRequestHandler
 from a2a.server.tasks import InMemoryTaskStore
 from a2a.types import AgentCapabilities, AgentCard, AgentSkill
 from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
 from opentelemetry.instrumentation.starlette import StarletteInstrumentor
 
 from agent_executor import AgentExecutor
@@ -41,7 +43,14 @@ class JWTContextMiddleware(BaseHTTPMiddleware):
             pass
 
 
+# Global agent executor — pre-warmed on startup
+_agent_executor: AgentExecutor | None = None
+
+
 def _build_app():
+    global _agent_executor
+    _agent_executor = AgentExecutor()
+
     _skill = AgentSkill(
         id="nomination-eta-agent",
         name="Nomination ETA Proposal Agent",
@@ -67,13 +76,24 @@ def _build_app():
     _server = A2AStarletteApplication(
         agent_card=_card,
         http_handler=DefaultRequestHandler(
-            agent_executor=AgentExecutor(),
+            agent_executor=_agent_executor,
             task_store=InMemoryTaskStore(),
         ),
     )
     _app = _server.build()
     _app.add_middleware(JWTContextMiddleware)
     StarletteInstrumentor().instrument_app(_app)
+
+    # Pre-warm the LLM on startup so first real request doesn't pay cold start cost
+    @_app.on_event("startup")
+    async def _warmup():
+        try:
+            logger.info("Pre-warming LLM connection...")
+            await _agent_executor.agent._get_llm()
+            logger.info("LLM pre-warm complete.")
+        except Exception as e:
+            logger.warning(f"LLM pre-warm failed (non-fatal): {e}")
+
     return _app
 
 
