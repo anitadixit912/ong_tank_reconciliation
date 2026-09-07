@@ -134,10 +134,13 @@ STEPS 8–9
 ═══════════════════════════════════════════════════════════
 
 STEP 8 — If REJECTED:
-  Call record_rejection_reason (supervisor's reason + instruction).
-  Call get_nomination_history_deep (pass supervisor_instruction).
-  Recalculate with calculate_eta_intelligence using updated inputs.
-  Present revised report. Ask APPROVE or REJECT.
+  IMMEDIATELY ask: "What is your reason for rejecting this ETA? Any specific instruction for reassessment
+  (e.g. 'use only last 6 months', 'vessel is faster than average', 'add 3 days for port congestion')?"
+  Then call record_rejection_reason with the supervisor's reason and instruction.
+  Call get_nomination_history_deep passing the supervisor_instruction.
+  Call calculate_eta_intelligence again with updated historical data.
+  The new report MUST be DIFFERENT from the rejected one — show what changed and why.
+  Present the revised report. Ask APPROVE or REJECT again.
 
 STEP 9 — If APPROVED:
   Call update_nomination_eta.

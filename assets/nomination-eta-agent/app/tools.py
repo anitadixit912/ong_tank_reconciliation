@@ -813,9 +813,10 @@ async def _calculate_eta_intelligence(
 
         # ── Stage 2: Carrier adjustment ───────────────────────────────────────
         carrier_adj = 0
-        carrier_context = carrier_name or carrier_recommendation
+        # Use carrier_name if available, otherwise show carrier_code, never show "NEUTRAL"
+        carrier_context = carrier_name if carrier_name and carrier_name not in ("NEUTRAL", "RELIABLE", "") else f"Carrier {carrier_recommendation}"
         if carrier_recommendation in ("NEUTRAL",) and not carrier_avg_delay_days:
-            adjustments_applied.append(f"Carrier: No adjustment — no historical performance data available for carrier {carrier_context}. Neutral assumption applied.")
+            adjustments_applied.append(f"Carrier: No adjustment — no historical performance data found. Neutral assumption applied.")
         elif carrier_recommendation == "RELIABLE":
             adjustments_applied.append(f"Carrier: No adjustment — {carrier_context} has a reliable on-time record. No buffer needed.")
         else:
@@ -835,14 +836,20 @@ async def _calculate_eta_intelligence(
         current_month_name = month_names.get(month, str(month))
         route_note = f" on the {route_desc} route" if route_desc else ""
 
+        # Detect if route is Middle East / Asia / non-US Gulf to avoid wrong seasonal reasoning
+        is_us_gulf = any(kw in (destination_location + origin_location + transport_system).upper()
+                         for kw in ["USMOB", "USHOU", "USGAL", "USPAS", "USGBO", "US", "GULF_OF_MEX", "BARGE_17"])
+
         if base_source == "LIVE_AIS":
-            adjustments_applied.append(f"Seasonal: No adjustment — live AIS vessel position is used as base ETA, so seasonal patterns are not applied (AIS already reflects actual vessel speed and conditions).")
-        elif month in (9, 10, 11):
+            adjustments_applied.append(f"Seasonal: No adjustment — live AIS vessel position used as base ETA. AIS already reflects actual vessel speed and current conditions.")
+        elif month in (9, 10, 11) and is_us_gulf:
             seasonal_adj = 1
-            adjustments_applied.append(f"Seasonal: +1d — {current_month_name} falls in the US Gulf hurricane and maintenance season (Sep–Nov){route_note}. Historical data shows 1–3 day delays are common during this period due to weather routing and port maintenance windows.")
+            adjustments_applied.append(f"Seasonal: +1d — {current_month_name} falls in the US Gulf hurricane and maintenance season (Sep–Nov){route_note}. Historical data shows 1–3 day delays due to weather routing and port maintenance.")
+        elif month in (6, 7, 8, 9) and not is_us_gulf:
+            adjustments_applied.append(f"Seasonal: No adjustment — {current_month_name} on this route has no significant seasonal disruption pattern. No buffer applied.")
         elif month in (1, 2, 3):
             seasonal_adj = -1
-            adjustments_applied.append(f"Seasonal: -1d — {current_month_name} is historically one of the faster months{route_note}. Fewer weather events and lower port congestion typically shorten transit times by 1 day.")
+            adjustments_applied.append(f"Seasonal: -1d — {current_month_name} is historically one of the faster months{route_note}. Fewer weather events typically shorten transit times by 1 day.")
         else:
             adjustments_applied.append(f"Seasonal: No adjustment — {current_month_name} has no significant seasonal pattern for this route. No buffer applied.")
 
@@ -885,11 +892,34 @@ async def _calculate_eta_intelligence(
             confidence = "Low"
             confidence_note = "Low confidence — no live vessel tracking or historical completion data available. ETA is based on the scheduled date only. Configure MST_API_KEY for live vessel tracking."
 
-        # Always show what data was used, even if only scheduled date
-        if not data_sources:
-            data_sources_display = ["SCHEDULED_DATE (only source available — no live AIS, no historical completions, no carrier history)"]
+        # Build detailed data sources display — always show every source checked
+        data_sources_display = []
+
+        # Live vessel tracking
+        if "LIVE_AIS" in data_sources:
+            data_sources_display.append("✅ Live Vessel Tracking (MyShipTracking) — vessel position and AIS-reported ETA used as base")
         else:
-            data_sources_display = data_sources
+            data_sources_display.append("❌ Live Vessel Tracking (MyShipTracking) — unavailable (MST_API_KEY not configured); scheduled date used instead")
+
+        # Historical patterns
+        if "HISTORICAL_AVG" in data_sources:
+            data_sources_display.append(f"✅ Historical Patterns (S/4HANA) — {historical_avg_days:.1f}d average lead time from past nominations used as base")
+        else:
+            data_sources_display.append("⚠️ Historical Patterns (S/4HANA) — no completion dates available yet in system; cannot compute lead times")
+
+        # Carrier performance
+        if "CARRIER_PERF" in data_sources:
+            data_sources_display.append(f"✅ Carrier Performance — historical delay data applied (+{carrier_adj}d)")
+        else:
+            data_sources_display.append("⚠️ Carrier Performance — no completed nominations found for this carrier; neutral assumption")
+
+        # GDELT
+        if "GDELT_NEWS" in data_sources:
+            data_sources_display.append(f"✅ Geopolitical Risk (GDELT) — {geopolitical_risk_level} risk detected; +{geo_adj}d buffer applied")
+        elif geopolitical_risk_level == "None":
+            data_sources_display.append("✅ Geopolitical Risk (GDELT) — scanned and clear; no disruptions found near route")
+        else:
+            data_sources_display.append("⚠️ Geopolitical Risk (GDELT) — scan unavailable or rate-limited; no geo buffer applied")
 
         # Reasoning
         reasoning_parts = []
