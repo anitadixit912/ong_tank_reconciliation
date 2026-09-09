@@ -15,7 +15,8 @@
   "scripts": {
     "start": "node node_modules/@sap/cds/bin/serve.js all --production",
     "test": "node --test --test-reporter=spec --test-reporter-destination=stdout --test-reporter=junit --test-reporter-destination=test-results.xml",
-    "custom_build": "node build.js"
+    "custom_build": "node build.js",
+    "deploy": "node build.js && cf push tank-reconciliation-cap-srv -p gen/srv"
   },
   "cds": {
     "requires": {
