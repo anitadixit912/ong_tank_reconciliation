@@ -715,6 +715,37 @@ export default function NominationEta() {
         ))}
       </FlexBox>
 
+      {/* Manual date picker — shown when agent asks for a manual date after rejection */}
+      {!loading && messages.length > 0 && (() => {
+        const last = messages[messages.length - 1];
+        const needsDate = last.role === 'assistant' && (
+          /provide.*manual date/i.test(last.text) ||
+          /enter.*date/i.test(last.text) ||
+          /manual date.*you would like/i.test(last.text) ||
+          /what date would you like/i.test(last.text) ||
+          /please.*provide.*date/i.test(last.text)
+        );
+        if (!needsDate) return null;
+        return (
+          <div style={{ background: '#f0f6ff', border: '1px solid #b3d1f7', borderRadius: '8px', padding: '0.75rem 1rem', display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+            <span style={{ fontSize: '0.875rem', fontWeight: 600, color: '#0050b3' }}>📅 Enter manual ETA date:</span>
+            <input
+              type="date"
+              id="manual-eta-date"
+              style={{ padding: '0.35rem 0.6rem', borderRadius: '6px', border: '1px solid #b3d1f7', fontSize: '0.875rem', outline: 'none' }}
+              min={new Date().toISOString().split('T')[0]}
+            />
+            <Button design="Emphasized" onClick={() => {
+              const val = document.getElementById('manual-eta-date').value;
+              if (!val) return;
+              sendMessage(val);
+            }}>
+              Submit Date
+            </Button>
+          </div>
+        );
+      })()}
+
       {/* Input row */}
       <FlexBox direction="Row" style={{ gap: '0.5rem' }}>
         <Input
