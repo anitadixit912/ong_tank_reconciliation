@@ -21,13 +21,15 @@ modules:
       buildpack: nodejs_buildpack
       memory: 256M
       disk-quota: 512M
+      routes:
+        - route: tank-reconciliation-cap-gdh-dev10.cfapps.us10.hana.ondemand.com
     build-parameters:
       builder: npm
       build-result: .
     provides:
       - name: srv-api
         properties:
-          srv-url: '${default-url}'
+          srv-url: https://tank-reconciliation-cap-gdh-dev10.cfapps.us10.hana.ondemand.com
     requires:
       - name: tank-reconciliation-xsuaa
       - name: tank-reconciliation-destination

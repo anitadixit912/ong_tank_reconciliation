@@ -16,7 +16,7 @@ applications:
       - proj-vector-destination-service
     env:
       AICORE_DESTINATION_NAME: aicore
-      CAP_BASE_URL: https://gdh-prj-vector-hackathon-apac-dev10-4dixnr9o-dev-tank-r5160c77f.cfapps.us10.hana.ondemand.com
+      CAP_BASE_URL: https://tank-reconciliation-cap-gdh-dev10.cfapps.us10.hana.ondemand.com
       LOG_LEVEL: INFO
       AGENT_LLM_MODEL: gpt-4o
       AGENT_PUBLIC_URL: https://nomination-eta-agent.cfapps.us10.hana.ondemand.com
