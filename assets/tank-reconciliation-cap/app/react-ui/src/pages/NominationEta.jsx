@@ -114,6 +114,103 @@ function MarkdownText({ text }) {
   return <div style={{ lineHeight: '1.6' }}>{elements}</div>;
 }
 
+// ── ETA Proposal Card ─────────────────────────────────────────────────────────
+function ETAProposalCard({ text, onApprove, onReject, onClose }) {
+  // Parse key fields from the agent's markdown ETA report
+  const extract = (patterns) => {
+    for (const p of patterns) {
+      const m = text.match(p);
+      if (m) return m[1]?.trim() || '';
+    }
+    return '';
+  };
+
+  const nomNum      = extract([/Nomination\s+#?(\S+)/i, /nomination number[:\s]+#?(\S+)/i]);
+  const eta         = extract([/Recommended ETA[:\s]+([0-9-]+)/i, /✅ Recommended ETA[:\s]+([0-9-]+)/i, /Final ETA[:\s]+([0-9-]+)/i, /ETA[:\s]+([0-9]{4}-[0-9]{2}-[0-9]{2})/]);
+  const confidence  = extract([/Confidence[:\s]+(High|Medium|Low)/i, /📊 Confidence[:\s]+(High|Medium|Low)/i]);
+  const material    = extract([/Material[:\s]+([^\n|]+)/i]);
+  const transport   = extract([/Transport(?:\s+System)?[:\s]+([^\n|]+)/i, /Transport[:\s]+([^\n|]+)/i]);
+  const origin      = extract([/Origin[:\s]+([^\n|]+)/i]);
+  const destination = extract([/Destination[:\s]+([^\n|]+)/i]);
+  const vessel      = extract([/Vessel[:\s]+([^\n|]+)/i]);
+  const route       = extract([/Route[:\s]+([^\n]+)/i, /🗺 Route[:\s]+([^\n]+)/i]);
+
+  // Extract reasoning — text after "AGENT REASONING" or "Note:" section
+  const reasoningMatch = text.match(/(?:reasoning|note)[:\s]*([^\n]+(?:\n(?![A-Z#*])[^\n]+)*)/i);
+  const reasoning = reasoningMatch ? reasoningMatch[1].trim() : '';
+
+  const confidenceColor = confidence === 'High' ? '#1a7a1a' : confidence === 'Medium' ? '#b36b00' : '#c62828';
+  const confidenceBg    = confidence === 'High' ? '#e8f5e9' : confidence === 'Medium' ? '#fff8e1' : '#fdecea';
+
+  return (
+    <div style={{ background: '#fff', border: '1px solid #c8d4f0', borderRadius: '12px', overflow: 'hidden', boxShadow: '0 4px 16px rgba(0,0,0,0.10)', maxWidth: '700px', width: '100%' }}>
+      {/* Header */}
+      <div style={{ background: 'linear-gradient(135deg, #0050b3 0%, #0070f2 100%)', padding: '1rem 1.25rem', color: '#fff' }}>
+        <div style={{ fontSize: '0.75rem', opacity: 0.8, marginBottom: '0.25rem', letterSpacing: '0.05em', textTransform: 'uppercase' }}>ETA Proposal — {nomNum || 'Nomination'}</div>
+        <div style={{ fontSize: '1.5rem', fontWeight: 700 }}>📊 Proposed ETA</div>
+      </div>
+
+      {/* KPIs */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', borderBottom: '1px solid #e8eaf0' }}>
+        {[
+          { label: 'PROPOSED ETA', value: eta ? new Date(eta + 'T00:00:00').toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—' },
+          { label: 'CONFIDENCE',   value: confidence || '—', color: confidenceColor, bg: confidenceBg },
+          { label: 'STATUS',       value: 'Proposed', color: '#0050b3', bg: '#e8f0fe' },
+        ].map((kpi, i) => (
+          <div key={i} style={{ padding: '0.75rem 1rem', borderRight: i < 2 ? '1px solid #e8eaf0' : 'none', textAlign: 'center' }}>
+            <div style={{ fontSize: '0.65rem', color: '#888', letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: '0.25rem' }}>{kpi.label}</div>
+            <div style={{ fontWeight: 700, fontSize: '1rem', color: kpi.color || '#1d2d3e', background: kpi.bg, borderRadius: '4px', padding: kpi.bg ? '2px 8px' : '0', display: 'inline-block' }}>{kpi.value}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Reasoning */}
+      {reasoning && (
+        <div style={{ padding: '0.75rem 1.25rem', borderBottom: '1px solid #e8eaf0', background: '#fafbff' }}>
+          <div style={{ fontSize: '0.7rem', color: '#888', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '0.35rem' }}>Agent Reasoning</div>
+          <div style={{ fontSize: '0.82rem', color: '#444', lineHeight: 1.5 }}>{reasoning}</div>
+        </div>
+      )}
+
+      {/* Nomination Details */}
+      <div style={{ padding: '0.75rem 1.25rem', borderBottom: '1px solid #e8eaf0' }}>
+        <div style={{ fontSize: '0.7rem', color: '#888', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '0.5rem' }}>Nomination Details</div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.5rem' }}>
+          {[
+            { label: 'MATERIAL',         value: material },
+            { label: 'TRANSPORT SYSTEM', value: transport },
+            { label: 'ROUTE',            value: route || (origin && destination ? `${origin} → ${destination}` : '') },
+            { label: 'ORIGIN',           value: origin },
+            { label: 'DESTINATION',      value: destination },
+            { label: 'VESSEL',           value: vessel },
+          ].filter(d => d.value).map((d, i) => (
+            <div key={i}>
+              <div style={{ fontSize: '0.63rem', color: '#aaa', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{d.label}</div>
+              <div style={{ fontSize: '0.82rem', fontWeight: 600, color: '#1d2d3e' }}>{d.value}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Action Buttons */}
+      <div style={{ padding: '0.75rem 1.25rem', display: 'flex', gap: '0.75rem', justifyContent: 'flex-end', background: '#f8f9fb' }}>
+        <button onClick={onClose}
+          style={{ padding: '0.45rem 1.1rem', borderRadius: '6px', border: '1px solid #ccc', background: '#fff', color: '#555', fontWeight: 600, cursor: 'pointer', fontSize: '0.85rem' }}>
+          ✕ Close
+        </button>
+        <button onClick={onReject}
+          style={{ padding: '0.45rem 1.1rem', borderRadius: '6px', border: '1px solid #d32f2f', background: '#fdecea', color: '#d32f2f', fontWeight: 600, cursor: 'pointer', fontSize: '0.85rem' }}>
+          ✗ Reject
+        </button>
+        <button onClick={onApprove}
+          style={{ padding: '0.45rem 1.1rem', borderRadius: '6px', border: 'none', background: '#1a7a1a', color: '#fff', fontWeight: 600, cursor: 'pointer', fontSize: '0.85rem' }}>
+          ✓ Approve
+        </button>
+      </div>
+    </div>
+  );
+}
+
 async function callNominationEtaAgent(userText, contextId) {
   const payload = {
     jsonrpc: '2.0',
@@ -672,23 +769,45 @@ export default function NominationEta() {
           flex: 1, minHeight: 0, overflowY: 'auto',
           padding: '1rem', display: 'flex', flexDirection: 'column', gap: '0.75rem',
         }}>
-          {messages.map((msg, i) => (
-            <FlexBox key={i} direction="Row" justifyContent={msg.role === 'user' ? 'End' : 'Start'}>
-              <div style={{
-                maxWidth: '75%',
-                padding: '0.6rem 1rem',
-                borderRadius: msg.role === 'user' ? '1rem 1rem 0.25rem 1rem' : '1rem 1rem 1rem 0.25rem',
-                background: msg.role === 'user' ? '#0070f2' : msg.isError ? '#ffd0d0' : '#f0f2f5',
-                color: msg.role === 'user' ? '#ffffff' : '#1d2d3e',
-                boxShadow: '0 1px 4px rgba(0,0,0,0.10)',
-                whiteSpace: msg.role === 'user' ? 'pre-wrap' : 'normal',
-                fontSize: '0.875rem',
-                lineHeight: '1.5',
-              }}>
-                {msg.role === 'assistant' ? <MarkdownText text={msg.text} /> : msg.text}
-              </div>
-            </FlexBox>
-          ))}
+          {messages.map((msg, i) => {
+            // Detect ETA proposal from agent
+            const isEtaProposal = msg.role === 'assistant' && !msg.dismissed && (
+              /Recommended ETA[:\s]+[0-9]{4}-[0-9]{2}-[0-9]{2}/i.test(msg.text) ||
+              /✅ Recommended ETA/i.test(msg.text) ||
+              (/ETA Intelligence Report/i.test(msg.text) && /Confidence/i.test(msg.text))
+            );
+
+            if (isEtaProposal) {
+              return (
+                <FlexBox key={i} direction="Row" justifyContent="Start">
+                  <ETAProposalCard
+                    text={msg.text}
+                    onApprove={() => { sendMessage('APPROVE'); }}
+                    onReject={() => { sendMessage('REJECT'); }}
+                    onClose={() => setMessages(prev => prev.map((m, mi) => mi === i ? { ...m, dismissed: true } : m))}
+                  />
+                </FlexBox>
+              );
+            }
+
+            return (
+              <FlexBox key={i} direction="Row" justifyContent={msg.role === 'user' ? 'End' : 'Start'}>
+                <div style={{
+                  maxWidth: '75%',
+                  padding: '0.6rem 1rem',
+                  borderRadius: msg.role === 'user' ? '1rem 1rem 0.25rem 1rem' : '1rem 1rem 1rem 0.25rem',
+                  background: msg.role === 'user' ? '#0070f2' : msg.isError ? '#ffd0d0' : '#f0f2f5',
+                  color: msg.role === 'user' ? '#ffffff' : '#1d2d3e',
+                  boxShadow: '0 1px 4px rgba(0,0,0,0.10)',
+                  whiteSpace: msg.role === 'user' ? 'pre-wrap' : 'normal',
+                  fontSize: '0.875rem',
+                  lineHeight: '1.5',
+                }}>
+                  {msg.role === 'assistant' ? <MarkdownText text={msg.text} /> : msg.text}
+                </div>
+              </FlexBox>
+            );
+          })}
           {loading && (
             <FlexBox direction="Row" justifyContent="Start">
               <div style={{ padding: '0.6rem 1rem', borderRadius: '1rem', background: '#f5f5f5' }}>
@@ -723,7 +842,13 @@ export default function NominationEta() {
           /enter.*date/i.test(last.text) ||
           /manual date.*you would like/i.test(last.text) ||
           /what date would you like/i.test(last.text) ||
-          /please.*provide.*date/i.test(last.text)
+          /please.*provide.*date/i.test(last.text) ||
+          /provide the.*date/i.test(last.text) ||
+          /new.*manual date/i.test(last.text) ||
+          /manual date.*nomination/i.test(last.text) ||
+          /date.*you.*like.*set/i.test(last.text) ||
+          /set.*eta.*date/i.test(last.text) ||
+          (/manual/i.test(last.text) && /date/i.test(last.text) && /provide|enter|set|like/i.test(last.text))
         );
         if (!needsDate) return null;
         return (
