@@ -1110,10 +1110,23 @@ module.exports = class ReconciliationService extends cds.ApplicationService {
           }
 
           // Extract nomination number from SOAP response
-          const nomSapMatch = soapRes.body.match(/<NOMINATIONNUMBER_SAP[^>]*>([^<$][^<]*)<\/NOMINATIONNUMBER_SAP>/i);
-          const nomExtMatch = soapRes.body.match(/<NOMINATIONNUMBER_EXT[^>]*>([^<]+)<\/NOMINATIONNUMBER_EXT>/i);
-          const nomNumber   = (nomSapMatch ? nomSapMatch[1].trim() : '') || (nomExtMatch ? nomExtMatch[1].trim() : '');
-          const nomDisplay  = nomNumber ? nomNumber.replace(/^0+/, '') : '';
+          // Extract nomination number — handles namespace prefixes e.g. <urn:NOMINATIONNUMBER_SAP>
+          const _extractNomNum = (body) => {
+            const patterns = [
+              /<(?:\w+:)?NOMINATIONNUMBER_SAP[^>]*>([^<]+)<\/(?:\w+:)?NOMINATIONNUMBER_SAP>/i,
+              /<(?:\w+:)?NOMINATIONNUMBER_EXT[^>]*>([^<]+)<\/(?:\w+:)?NOMINATIONNUMBER_EXT>/i,
+              /<(?:\w+:)?NOMINATIONNUMBER(?!_)[^>]*>([^<]+)<\/(?:\w+:)?NOMINATIONNUMBER>/i,
+              /<(?:\w+:)?NOMINATION_NUMBER[^>]*>([^<]+)<\/(?:\w+:)?NOMINATION_NUMBER>/i,
+            ];
+            for (const p of patterns) {
+              const m = body.match(p);
+              if (m && m[1].trim()) return m[1].trim();
+            }
+            return '';
+          };
+          const nomNumber  = _extractNomNum(soapRes.body);
+          const nomDisplay = nomNumber ? (nomNumber.replace(/^0+/, '') || nomNumber) : '';
+          cds.log('s4').info('createNomination: extracted nomNumber=' + (nomNumber || 'NOT FOUND') + ' nomDisplay=' + nomDisplay);
 
           // Commit the transaction — RFC does not auto-commit (SAP BAPI pattern)
           const commitBody = `<?xml version="1.0" encoding="UTF-8"?>
