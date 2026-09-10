@@ -532,10 +532,19 @@ export default function NominationEta() {
         const itemLines = items.map((it, idx) =>
           `  - **Item ${idx + 1}:** ${it.Demandmaterial || '–'} | Qty: ${parseFloat(it.Nominatedqty || 0).toLocaleString()} ${it.Quantityunit || ''} | Location: ${it.Locationid || '–'} | Date: ${it.Scheduleddate || '–'} | Type: ${it.Itemtype || '–'}`
         ).join('\n');
-        const verifiedTS   = result.TransportSystem  || form.Transportsystem;
-        const verifiedType = result.NominationType   || form.Nominationtype;
-        const verifiedMOT  = result.ModeOfTransport  || form.Modeoftransport;
+        const verifiedTS    = result.TransportSystem  || form.Transportsystem;
+        const verifiedType  = result.NominationType   || form.Nominationtype;
+        const verifiedMOT   = result.ModeOfTransport  || form.Modeoftransport;
         const verifiedStatus = result.NominationStatus || '1';
+        let verifiedItems = [];
+        try { verifiedItems = JSON.parse(result.VerifiedItems || '[]'); } catch(_) {}
+        const itemLines = verifiedItems.length > 0
+          ? verifiedItems.map((it, idx) =>
+              `  - **Item ${it.itemNumber || idx+1}:** ${it.material || '–'} | Qty: ${parseFloat(it.qty||0).toLocaleString()} ${it.uom || ''} | Location: ${it.location || '–'} | Date: ${it.scheduledDate || '–'} | Type: ${it.itemType || '–'}`
+            ).join('\n')
+          : items.map((it, idx) =>
+              `  - **Item ${idx + 1}:** ${it.Demandmaterial || '–'} | Qty: ${parseFloat(it.Nominatedqty || 0).toLocaleString()} ${it.Quantityunit || ''} | Location: ${it.Locationid || '–'} | Date: ${it.Scheduleddate || '–'} | Type: ${it.Itemtype || '–'}`
+            ).join('\n');
         setCreateMsg({ ok: true, text: `✅ Nomination created! Nom Key: ${nomKey} | Nom Number: ${nomNumber || '–'}` });
         setMessages(prev => [...prev, {
           role: 'assistant',
@@ -548,14 +557,11 @@ export default function NominationEta() {
             `- **Nomination Type:** ${verifiedType}`,
             `- **Mode of Transport:** ${verifiedMOT}`,
             `- **Status:** ${verifiedStatus === '1' ? '🟢 Open' : verifiedStatus}`,
-            ``,
-            `> ℹ️ The Nom Key is SAP's internal identifier used for status tracking, event management and downstream documents. The number range **OIJNOM** must be configured in SPRO → TSW → Nomination for unique keys.`,
-            `- **Transport System:** ${form.Transportsystem}`,
-            `- **Nomination Type:** ${form.Nominationtype}`,
-            `- **Mode of Transport:** ${form.Modeoftransport || '–'}`,
             `- **Vehicle ID:** ${form.Vehicleid || '–'}`,
             `- **Carrier:** ${form.Carrier ? `${form.Carrier}${form.CarrierName ? ' — ' + form.CarrierName : ''}` : '–'}`,
             `- **Shipper:** ${form.Shipper ? `${form.Shipper}${form.ShipperName ? ' — ' + form.ShipperName : ''}` : '–'}`,
+            ``,
+            `> ℹ️ The Nom Key is SAP's internal identifier used for status tracking, event management and downstream documents. The number range **OIJNOM** must be configured in SPRO → TSW → Nomination for unique keys.`,
             `- **Items (${items.length}):**`,
             itemLines,
             ``,

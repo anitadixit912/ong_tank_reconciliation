@@ -142,6 +142,7 @@ service ReconciliationService @(path: '/reconciliation')
     NominationType   : String(4);
     ModeOfTransport  : String(2);
     NominationStatus : String(1);
+    VerifiedItems    : String(5000);
     message          : String;
   };
 

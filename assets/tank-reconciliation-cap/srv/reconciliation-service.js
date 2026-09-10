@@ -1145,34 +1145,43 @@ module.exports = class ReconciliationService extends cds.ApplicationService {
             cds.log('s4').warn('createNomination: COMMIT failed: ' + commitErr.message);
           }
 
-          cds.log('s4').info('createNomination: committed — nomKey=' + nomNumber + ' nomNumber=' + (Nominationnumber || ''));
+          // Extract verified data directly from SOAP response — no extra OData call needed
+          const _extractSoap = (tag) => {
+            const m = soapRes.body.match(new RegExp('<(?:\\w+:)?' + tag + '[^>]*>([^<]*)<\\/(?:\\w+:)?' + tag + '>', 'i'));
+            return m ? m[1].trim() : '';
+          };
+          const verifiedTS    = _extractSoap('TRANSPORTSYSTEM') || Transportsystem || '';
+          const verifiedMOT   = _extractSoap('MODOFTRANSPORT')  || Modeoftransport || '';
+          const verifiedType  = _extractSoap('NOMINATIONTYPE')  || Nominationtype  || '';
+          const verifiedStatus = _extractSoap('NOMINATIONSTATUS') || '1';
 
-          // Fetch the created nomination from SAP using the Nom Key to get correct data
-          let fetchedNom = null;
-          try {
-            const nomKeyEncoded = encodeURIComponent(`NominationDoc eq '${nomNumber}'`);
-            const fetchPath = '/sap/opu/odata/sap/TSW_MYNOMINATIONS_SRV_01/C_Oij06_MyNominations?$filter=' + nomKeyEncoded + '&$top=1&$format=json' + clientParam;
-            const fetchRes = await _httpGet(baseUrl + fetchPath, { Accept: 'application/json', ...(authHeader ? { Authorization: authHeader } : {}) }, proxyOpts);
-            if (fetchRes.status === 200) {
-              const fetchPayload = JSON.parse(fetchRes.body);
-              const results = (fetchPayload.d && fetchPayload.d.results) ? fetchPayload.d.results : [];
-              if (results.length > 0) {
-                fetchedNom = results[0];
-                cds.log('s4').info('createNomination: fetched nomination — doc=' + fetchedNom.NominationDoc + ' ts=' + fetchedNom.TransportSystem);
-              }
-            }
-          } catch (fetchErr) {
-            cds.log('s4').warn('createNomination: failed to fetch created nomination: ' + fetchErr.message);
-          }
+          // Extract items from SOAP response
+          const itemMatches = [...soapRes.body.matchAll(/<item>([\s\S]*?)<\/item>/gi)];
+          const verifiedItems = itemMatches.map(m => {
+            const block = m[1];
+            const getField = (f) => { const x = block.match(new RegExp('<' + f + '[^>]*>([^<]*)<\\/' + f + '>', 'i')); return x ? x[1].trim() : ''; };
+            return {
+              itemNumber:   getField('ITEMNUMBER').replace(/^0+/, ''),
+              material:     getField('DEMANDMATERIAL_LONG') || getField('DEMANDMATERIAL'),
+              qty:          getField('NOMINATEDQUANTITY'),
+              uom:          getField('QUANTITYUNIT_SAP'),
+              location:     getField('LOCATIONID'),
+              scheduledDate:getField('SCHEDULEDDATE'),
+              itemType:     getField('ITEMTYPE'),
+            };
+          });
+
+          cds.log('s4').info('createNomination: verified from SOAP — ts=' + verifiedTS + ' mot=' + verifiedMOT + ' items=' + verifiedItems.length);
 
           return {
             success: true,
             Nominationnumber: Nominationnumber || '',
             NomKey: nomNumber,
-            TransportSystem: fetchedNom?.TransportSystem || Transportsystem || '',
-            NominationType: fetchedNom?.NominationType || Nominationtype || '',
-            ModeOfTransport: fetchedNom?.NominationModeOfTransport || Modeoftransport || '',
-            NominationStatus: fetchedNom?.NominationHeaderStatus || '',
+            TransportSystem:  verifiedTS,
+            NominationType:   verifiedType,
+            ModeOfTransport:  verifiedMOT,
+            NominationStatus: verifiedStatus,
+            VerifiedItems:    JSON.stringify(verifiedItems),
             message: `Nomination created successfully. Nom Number: ${Nominationnumber || '–'} | Nom Key: ${nomNumber}`
           };
         } else {
