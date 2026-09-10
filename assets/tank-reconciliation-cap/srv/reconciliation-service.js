@@ -1010,7 +1010,7 @@ module.exports = class ReconciliationService extends cds.ApplicationService {
 
     // ── createNomination ─────────────────────────────────────────────────────
     this.on('createNomination', async (req) => {
-      const { Nominationtype, Transportsystem, Modeoftransport, Vehicleid, Carrier, Shipper, Items } = req.data;
+      const { Nominationtype, Transportsystem, Modeoftransport, Vehicleid, Carrier, Shipper, Nominationnumber, Items } = req.data;
       try {
         const cfg     = await _resolveDestination(S4HANA_DESTINATION);
         const baseUrl = (cfg.URL || cfg.url || '').replace(/\/$/, '');
@@ -1054,6 +1054,7 @@ module.exports = class ReconciliationService extends cds.ApplicationService {
   <soapenv:Body>
     <urn:RFC_TSW_NOM_CREATEFROMDATA>
       <HEADERDATA_IN>
+        <NOMINATIONNUMBER_EXT>${Nominationnumber || ''}</NOMINATIONNUMBER_EXT>
         <TRANSPORTSYSTEM>${Transportsystem || ''}</TRANSPORTSYSTEM>
         <NOMINATIONTYPE>${Nominationtype || ''}</NOMINATIONTYPE>
         <MODOFTRANSPORT>${Modeoftransport || ''}</MODOFTRANSPORT>
@@ -1143,8 +1144,8 @@ module.exports = class ReconciliationService extends cds.ApplicationService {
             cds.log('s4').warn('createNomination: COMMIT failed: ' + commitErr.message);
           }
 
-          cds.log('s4').info('createNomination: committed — nom=' + nomDisplay);
-          return { success: true, Nominationnumber: nomDisplay, message: `Nomination ${nomDisplay} created and committed successfully.` };
+          cds.log('s4').info('createNomination: committed — nomKey=' + nomNumber + ' nomNumber=' + (Nominationnumber || ''));
+          return { success: true, Nominationnumber: Nominationnumber || '', NomKey: nomNumber, message: `Nomination created successfully. Nom Number: ${Nominationnumber || '–'} | Nom Key: ${nomNumber}` };
         } else {
           const faultMatch = soapRes.body.match(/<faultstring[^>]*>([^<]+)<\/faultstring>/i);
           return { success: false, Nominationnumber: '', message: faultMatch ? faultMatch[1] : 'SOAP HTTP ' + soapRes.status };
