@@ -971,7 +971,30 @@ module.exports = class ReconciliationService extends cds.ApplicationService {
         _vhFetch('I_NominationTypeVH',            r => r.NominationType     ? { Nominationtype: r.NominationType, Description: r.NominationTypeDescription || r.NominationType } : null),
         _vhFetch('SITYPSet',                      r => r.Sityp ? { Itemtype: r.Sityp, Description: r.Description || r.Ltx || r.Kbez || r.Sityp } : null),
         _vhFetch('I_NominationModeOfTranspVH',    r => r.ModeOfTransport    ? { ModeOfTransport: r.ModeOfTransport, Description: r.ModeOfTransportDesc || r.ModeOfTransport } : null),
-        _vhFetch('I_NominationMvtScenarioVH',     r => r.MovementScenario   ? { Movementscenario: r.MovementScenario, Description: r.MovementScenarioDesc || r.MovementScenarioName || r.MovementScenario } : null),
+        // Try multiple possible entity names for Movement Scenario VH
+        (async () => {
+          const entities = ['I_NominationMvtScenarioVH', 'SIMOVESet', 'I_OilGasTSWMvtScenarioVH', 'I_NomMvtScenarioVH', 'SMOVSSet'];
+          for (const entity of entities) {
+            try {
+              const r = await _httpGet(baseUrl + BASE + '/' + entity + '?$format=json&$top=1' + sapClientParam, headers, proxyOpts);
+              if (r.status === 200) {
+                cds.log('s4').info('MovementScenario VH found: ' + entity + ' keys=' + Object.keys((JSON.parse(r.body).d?.results || [{}])[0] || {}).filter(k => k !== '__metadata').join(', '));
+                const rows = JSON.parse(r.body).d?.results || [];
+                // Fetch all records now that we found the entity
+                const allR = await _httpGet(baseUrl + BASE + '/' + entity + '?$format=json&$top=200' + sapClientParam, headers, proxyOpts);
+                const allRows = JSON.parse(allR.body).d?.results || [];
+                return allRows.map(row => {
+                  const keys = Object.keys(row).filter(k => k !== '__metadata');
+                  const codeKey = keys.find(k => k.toLowerCase().includes('scenario') || k.toLowerCase().includes('move') || k.toLowerCase() === 'simove') || keys[0];
+                  const descKey = keys.find(k => k.toLowerCase().includes('desc') || k.toLowerCase().includes('text') || k.toLowerCase().includes('name')) || keys[1];
+                  return row[codeKey] ? { Movementscenario: row[codeKey], Description: row[descKey] || row[codeKey] } : null;
+                }).filter(Boolean);
+              }
+            } catch(_) {}
+          }
+          cds.log('s4').warn('No MovementScenario VH entity found — tried: ' + entities.join(', '));
+          return [];
+        })(),
       ]);
 
       cds.log('s4').info('ValueHelps: loc=' + locations.length + ' mat=' + materials.length + ' ts=' + transportSystems.length + ' uom=' + quantityUnits.length + ' nt=' + nominationTypes.length + ' it=' + itemTypes.length + ' mot=' + modesOfTransport.length + ' mvt=' + movementScenarios.length);
