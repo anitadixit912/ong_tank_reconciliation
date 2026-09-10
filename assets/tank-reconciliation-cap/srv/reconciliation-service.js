@@ -963,19 +963,20 @@ module.exports = class ReconciliationService extends cds.ApplicationService {
         return [];
       };
 
-      const [locations, materials, transportSystems, quantityUnits, nominationTypes, itemTypes, modesOfTransport] = await Promise.all([
-        _vhFetch('I_LocationIdVH',             r => r.LocationId         ? { Locationid: r.LocationId, Description: r.LocationName || r.LocationId } : null),
-        _vhFetch('I_ScheduledMaterialVH',      r => r.ScheduledMaterial  ? { Demandmaterial: r.ScheduledMaterial, Description: r.MaterialDesc || r.ScheduledMaterial } : null),
-        _vhFetch('I_NominationTransptSystVH',  r => r.TransportSystem    ? { Transportsystem: r.TransportSystem, Description: r.TransportSystemName || r.TransportSystem } : null),
-        _vhFetch('I_NominationUoMVH',          r => r.TicketUnitOfMeasure ? { Unit: r.TicketUnitOfMeasure, Description: r.TicketUnitOfMeasureDescription || r.TicketUnitOfMeasure } : null),
-        _vhFetch('I_NominationTypeVH',         r => r.NominationType     ? { Nominationtype: r.NominationType, Description: r.NominationTypeDescription || r.NominationType } : null),
-        _vhFetch('SITYPSet',                   r => r.Sityp ? { Itemtype: r.Sityp, Description: r.Description || r.Ltx || r.Kbez || r.Sityp } : null),
-        _vhFetch('I_NominationModeOfTranspVH', r => r.ModeOfTransport    ? { ModeOfTransport: r.ModeOfTransport, Description: r.ModeOfTransportDesc || r.ModeOfTransport } : null),
+      const [locations, materials, transportSystems, quantityUnits, nominationTypes, itemTypes, modesOfTransport, movementScenarios] = await Promise.all([
+        _vhFetch('I_LocationIdVH',                r => r.LocationId         ? { Locationid: r.LocationId, Description: r.LocationName || r.LocationId } : null),
+        _vhFetch('I_ScheduledMaterialVH',         r => r.ScheduledMaterial  ? { Demandmaterial: r.ScheduledMaterial, Description: r.MaterialDesc || r.ScheduledMaterial } : null),
+        _vhFetch('I_NominationTransptSystVH',     r => r.TransportSystem    ? { Transportsystem: r.TransportSystem, Description: r.TransportSystemName || r.TransportSystem } : null),
+        _vhFetch('I_NominationUoMVH',             r => r.TicketUnitOfMeasure ? { Unit: r.TicketUnitOfMeasure, Description: r.TicketUnitOfMeasureDescription || r.TicketUnitOfMeasure } : null),
+        _vhFetch('I_NominationTypeVH',            r => r.NominationType     ? { Nominationtype: r.NominationType, Description: r.NominationTypeDescription || r.NominationType } : null),
+        _vhFetch('SITYPSet',                      r => r.Sityp ? { Itemtype: r.Sityp, Description: r.Description || r.Ltx || r.Kbez || r.Sityp } : null),
+        _vhFetch('I_NominationModeOfTranspVH',    r => r.ModeOfTransport    ? { ModeOfTransport: r.ModeOfTransport, Description: r.ModeOfTransportDesc || r.ModeOfTransport } : null),
+        _vhFetch('I_NominationMvtScenarioVH',     r => r.MovementScenario   ? { Movementscenario: r.MovementScenario, Description: r.MovementScenarioDesc || r.MovementScenarioName || r.MovementScenario } : null),
       ]);
 
-      cds.log('s4').info('ValueHelps: loc=' + locations.length + ' mat=' + materials.length + ' ts=' + transportSystems.length + ' uom=' + quantityUnits.length + ' nt=' + nominationTypes.length + ' it=' + itemTypes.length + ' mot=' + modesOfTransport.length);
+      cds.log('s4').info('ValueHelps: loc=' + locations.length + ' mat=' + materials.length + ' ts=' + transportSystems.length + ' uom=' + quantityUnits.length + ' nt=' + nominationTypes.length + ' it=' + itemTypes.length + ' mot=' + modesOfTransport.length + ' mvt=' + movementScenarios.length);
 
-      return { locations, materials, transportSystems, quantityUnits, nominationTypes, itemTypes, modesOfTransport };
+      return { locations, materials, transportSystems, quantityUnits, nominationTypes, itemTypes, modesOfTransport, movementScenarios };
     });
 
     // ── getCarrierShipperByTS ────────────────────────────────────────────────
@@ -1039,12 +1040,13 @@ module.exports = class ReconciliationService extends cds.ApplicationService {
 
         // Build NOMINATIONITEM_IN XML
         const itemsXml = items.map((item, idx) => {
-          const itemNo    = String((idx + 1) * 10).padStart(10, '0');
+          const itemNo        = String((idx + 1) * 10).padStart(10, '0');
           const dateFormatted = (item.Scheduleddate || '').replace(/-/g, '');
           return `<item>
           <ITEMNUMBER>${itemNo}</ITEMNUMBER>
           <ITEMTYPE>${item.Itemtype || 'D'}</ITEMTYPE>
           <ITEMSTATUS>1</ITEMSTATUS>
+          <MOVEMENTSCENARIO>${item.Movementscenario || ''}</MOVEMENTSCENARIO>
           <DOCUMENTINDICATOR>${item.Documentindicator || 'X'}</DOCUMENTINDICATOR>
           <SCHEDULEDDATE>${dateFormatted}</SCHEDULEDDATE>
           <LOCATIONID>${item.Locationid || ''}</LOCATIONID>
@@ -1103,9 +1105,22 @@ module.exports = class ReconciliationService extends cds.ApplicationService {
           cds.log('s4').warn('createNomination: CSRF fetch failed: ' + csrfErr.message);
         }
 
-        cds.log('s4').info('createNomination: calling RFC via SOAP');
+        // Use SAP stateful session — RFC and COMMIT must run in same session
+        soapHeaders['SAP-Session'] = 'stateful';
+
+        cds.log('s4').info('createNomination: calling RFC via SOAP (stateful session)');
         const soapRes = await _httpPost(soapUrl, soapBody, soapHeaders, proxyOpts);
         cds.log('s4').info('createNomination: SOAP status=' + soapRes.status + ' body=' + soapRes.body.slice(0, 5000));
+
+        // Extract SAP session ID and cookies from RFC response — COMMIT MUST use same session
+        const sapSessionId = soapRes.headers && (soapRes.headers['sap-session'] || soapRes.headers['SAP-Session'] || soapRes.headers['x-sap-session']);
+        const rfcSetCookie = soapRes.headers && soapRes.headers['set-cookie'];
+        if (rfcSetCookie) {
+          const rfcCookies = Array.isArray(rfcSetCookie) ? rfcSetCookie : [rfcSetCookie];
+          soapHeaders['Cookie'] = rfcCookies.map(c => c.split(';')[0]).join('; ');
+        }
+        if (sapSessionId) soapHeaders['SAP-Session'] = sapSessionId;
+        cds.log('s4').info('createNomination: session cookie=' + (soapHeaders['Cookie'] ? 'found' : 'MISSING') + ' sap-session=' + (sapSessionId || 'MISSING'));
 
         if (soapRes.status === 200) {
           // Check all TYPE tags in RETURN table for errors
@@ -1151,8 +1166,9 @@ module.exports = class ReconciliationService extends cds.ApplicationService {
 </soapenv:Envelope>`;
           const commitUrl = baseUrl + '/sap/bc/soap/rfc?services=BAPI_TRANSACTION_COMMIT' + clientParam;
           try {
-            const commitRes = await _httpPost(commitUrl, commitBody, { ...soapHeaders, 'SOAPAction': 'BAPI_TRANSACTION_COMMIT' }, proxyOpts);
-            cds.log('s4').info('createNomination: COMMIT status=' + commitRes.status);
+            const commitHeaders = { ...soapHeaders, 'SOAPAction': 'BAPI_TRANSACTION_COMMIT', 'SAP-Session': 'close' };
+            const commitRes = await _httpPost(commitUrl, commitBody, commitHeaders, proxyOpts);
+            cds.log('s4').info('createNomination: COMMIT status=' + commitRes.status + ' body=' + commitRes.body.slice(0, 200));
           } catch (commitErr) {
             cds.log('s4').warn('createNomination: COMMIT failed: ' + commitErr.message);
           }

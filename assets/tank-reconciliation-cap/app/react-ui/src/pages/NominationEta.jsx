@@ -14,14 +14,14 @@ import {
 
 const EMPTY_FORM = {
   Nominationnumber: '',
-  Nominationtype:  '',
-  Transportsystem: '',
-  Modeoftransport: '',
-  Vehicleid:       '',
-  Carrier:         '',
-  CarrierName:     '',
-  Shipper:         '',
-  ShipperName:     '',
+  Nominationtype:   '',
+  Transportsystem:  '',
+  Modeoftransport:  '',
+  Vehicleid:        '',
+  Carrier:          '',
+  CarrierName:      '',
+  Shipper:          '',
+  ShipperName:      '',
 };
 
 const SUGGESTIONS = [
@@ -396,7 +396,7 @@ export default function NominationEta() {
   const [contextId, setContextId]   = useState(null);
   const [showCreate, setShowCreate] = useState(false);
   const [form, setForm]             = useState(EMPTY_FORM);
-  const [items, setItems]           = useState([{ Itemtype: '', Locationid: '', Demandmaterial: '', Nominatedqty: '', Quantityunit: '', Scheduleddate: '', Documentindicator: 'X' }]);
+  const [items, setItems]           = useState([{ Itemtype: '', Locationid: '', Demandmaterial: '', Nominatedqty: '', Quantityunit: '', Scheduleddate: '', Documentindicator: 'X', Movementscenario: '' }]);
   const [creating, setCreating]     = useState(false);
   const [createMsg, setCreateMsg]   = useState(null);
   const [valueHelps, setValueHelps] = useState({ locations: [], materials: [], transportSystems: [], quantityUnits: [], nominationTypes: [], itemTypes: [], modesOfTransport: [] });
@@ -438,7 +438,7 @@ export default function NominationEta() {
     } catch(_) {}
   };
 
-  const addItem    = () => setItems(prev => [...prev, { Itemtype: '', Locationid: '', Demandmaterial: '', Nominatedqty: '', Quantityunit: '', Scheduleddate: '', Documentindicator: 'X' }]);
+  const addItem    = () => setItems(prev => [...prev, { Itemtype: '', Locationid: '', Demandmaterial: '', Nominatedqty: '', Quantityunit: '', Scheduleddate: '', Documentindicator: 'X', Movementscenario: '' }]);
   const removeItem = (idx) => setItems(prev => prev.filter((_, i) => i !== idx));
   const setItemField = (idx, field, value) => setItems(prev => prev.map((it, i) => i === idx ? { ...it, [field]: value } : it));
 
@@ -565,7 +565,7 @@ export default function NominationEta() {
             `Would you like me to propose an ETA for nomination **${(nomKey || '').replace(/^[$0]+/, '') || nomNumber || nomKey}**?`,
           ].join('\n'),
         }]);
-        setTimeout(() => { setShowCreate(false); setForm(EMPTY_FORM); setItems([{ Itemtype: '', Locationid: '', Demandmaterial: '', Nominatedqty: '', Quantityunit: '', Scheduleddate: '', Documentindicator: 'X' }]); setCreateMsg(null); }, 1500);
+        setTimeout(() => { setShowCreate(false); setForm(EMPTY_FORM); setItems([{ Itemtype: '', Locationid: '', Demandmaterial: '', Nominatedqty: '', Quantityunit: '', Scheduleddate: '', Documentindicator: 'X', Movementscenario: '' }]); setCreateMsg(null); }, 1500);
         // Auto-refresh nominations list after 10s to catch S/4HANA async commit
         setTimeout(() => refreshNominations(), 10000);
       } else {
@@ -753,6 +753,17 @@ export default function NominationEta() {
                       <Option value="">-- Select --</Option>
                       {valueHelps.quantityUnits.map(u => (
                         <Option key={u.Unit} value={u.Unit} selected={item.Quantityunit === u.Unit}>{u.Unit} ({u.Description})</Option>
+                      ))}
+                    </Select>
+                  </div>
+                  <div>
+                    <Label>Movement Scenario</Label>
+                    <Select style={{ width: '100%' }} onChange={e => setItemField(idx, 'Movementscenario', e.detail.selectedOption.value)}>
+                      <Option value="">-- Select --</Option>
+                      {(valueHelps.movementScenarios || []).map(m => (
+                        <Option key={m.Movementscenario} value={m.Movementscenario} selected={item.Movementscenario === m.Movementscenario}>
+                          {m.Movementscenario}{m.Description && m.Description !== m.Movementscenario ? ` — ${m.Description}` : ''}
+                        </Option>
                       ))}
                     </Select>
                   </div>
