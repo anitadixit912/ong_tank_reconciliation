@@ -529,9 +529,6 @@ export default function NominationEta() {
       if (result?.success) {
         const nomNumber = result.Nominationnumber || form.Nominationnumber || '';
         const nomKey    = result.NomKey || '';
-        const itemLines = items.map((it, idx) =>
-          `  - **Item ${idx + 1}:** ${it.Demandmaterial || '–'} | Qty: ${parseFloat(it.Nominatedqty || 0).toLocaleString()} ${it.Quantityunit || ''} | Location: ${it.Locationid || '–'} | Date: ${it.Scheduleddate || '–'} | Type: ${it.Itemtype || '–'}`
-        ).join('\n');
         const verifiedTS    = result.TransportSystem  || form.Transportsystem;
         const verifiedType  = result.NominationType   || form.Nominationtype;
         const verifiedMOT   = result.ModeOfTransport  || form.Modeoftransport;
