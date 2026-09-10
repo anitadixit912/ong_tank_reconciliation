@@ -126,6 +126,7 @@ service ReconciliationService @(path: '/reconciliation')
 
   // ─── Create Nomination in S/4HANA OGS TSW ────────────────────────────────
   action createNomination(
+    Nominationnumber : String(20),
     Nominationtype  : String(4),
     Transportsystem : String(10),
     Modeoftransport : String(2),
@@ -136,6 +137,7 @@ service ReconciliationService @(path: '/reconciliation')
   ) returns {
     success          : Boolean;
     Nominationnumber : String(20);
+    NomKey           : String(20);
     message          : String;
   };
 
