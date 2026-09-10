@@ -259,6 +259,7 @@ async function _fetchOpenNominations() {
         ShipperDesc:      n.NominationShipperDesc   || '',
         InTransitPlant:   n.InTransitPlant          || '',
         VehicleId:        n.VehicleId               || '',
+        Nomnr:            n.NominationNumber || n.ExternalNominationNumber || n.Nomnr || '',
       };
     });
   } catch (err) {
@@ -1145,7 +1146,35 @@ module.exports = class ReconciliationService extends cds.ApplicationService {
           }
 
           cds.log('s4').info('createNomination: committed — nomKey=' + nomNumber + ' nomNumber=' + (Nominationnumber || ''));
-          return { success: true, Nominationnumber: Nominationnumber || '', NomKey: nomNumber, message: `Nomination created successfully. Nom Number: ${Nominationnumber || '–'} | Nom Key: ${nomNumber}` };
+
+          // Fetch the created nomination from SAP using the Nom Key to get correct data
+          let fetchedNom = null;
+          try {
+            const nomKeyEncoded = encodeURIComponent(`NominationDoc eq '${nomNumber}'`);
+            const fetchPath = '/sap/opu/odata/sap/TSW_MYNOMINATIONS_SRV_01/C_Oij06_MyNominations?$filter=' + nomKeyEncoded + '&$top=1&$format=json' + clientParam;
+            const fetchRes = await _httpGet(baseUrl + fetchPath, { Accept: 'application/json', ...(authHeader ? { Authorization: authHeader } : {}) }, proxyOpts);
+            if (fetchRes.status === 200) {
+              const fetchPayload = JSON.parse(fetchRes.body);
+              const results = (fetchPayload.d && fetchPayload.d.results) ? fetchPayload.d.results : [];
+              if (results.length > 0) {
+                fetchedNom = results[0];
+                cds.log('s4').info('createNomination: fetched nomination — doc=' + fetchedNom.NominationDoc + ' ts=' + fetchedNom.TransportSystem);
+              }
+            }
+          } catch (fetchErr) {
+            cds.log('s4').warn('createNomination: failed to fetch created nomination: ' + fetchErr.message);
+          }
+
+          return {
+            success: true,
+            Nominationnumber: Nominationnumber || '',
+            NomKey: nomNumber,
+            TransportSystem: fetchedNom?.TransportSystem || Transportsystem || '',
+            NominationType: fetchedNom?.NominationType || Nominationtype || '',
+            ModeOfTransport: fetchedNom?.NominationModeOfTransport || Modeoftransport || '',
+            NominationStatus: fetchedNom?.NominationHeaderStatus || '',
+            message: `Nomination created successfully. Nom Number: ${Nominationnumber || '–'} | Nom Key: ${nomNumber}`
+          };
         } else {
           const faultMatch = soapRes.body.match(/<faultstring[^>]*>([^<]+)<\/faultstring>/i);
           return { success: false, Nominationnumber: '', message: faultMatch ? faultMatch[1] : 'SOAP HTTP ' + soapRes.status };

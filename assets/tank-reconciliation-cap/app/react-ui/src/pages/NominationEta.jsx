@@ -532,14 +532,22 @@ export default function NominationEta() {
         const itemLines = items.map((it, idx) =>
           `  - **Item ${idx + 1}:** ${it.Demandmaterial || '–'} | Qty: ${parseFloat(it.Nominatedqty || 0).toLocaleString()} ${it.Quantityunit || ''} | Location: ${it.Locationid || '–'} | Date: ${it.Scheduleddate || '–'} | Type: ${it.Itemtype || '–'}`
         ).join('\n');
+        const verifiedTS   = result.TransportSystem  || form.Transportsystem;
+        const verifiedType = result.NominationType   || form.Nominationtype;
+        const verifiedMOT  = result.ModeOfTransport  || form.Modeoftransport;
+        const verifiedStatus = result.NominationStatus || '1';
         setCreateMsg({ ok: true, text: `✅ Nomination created! Nom Key: ${nomKey} | Nom Number: ${nomNumber || '–'}` });
         setMessages(prev => [...prev, {
           role: 'assistant',
           text: [
-            `✅ **Nomination Created Successfully**`,
+            `✅ **Nomination Created Successfully** _(verified from SAP)_`,
             ``,
             `- **Nom Key (NOMTK):** \`${nomKey}\` _(system-generated — use this for ETA proposals and all SAP processing)_`,
             `- **Nom Number (NOMNR):** ${nomNumber || '–'} _(user-defined business reference, non-unique)_`,
+            `- **Transport System:** ${verifiedTS}`,
+            `- **Nomination Type:** ${verifiedType}`,
+            `- **Mode of Transport:** ${verifiedMOT}`,
+            `- **Status:** ${verifiedStatus === '1' ? '🟢 Open' : verifiedStatus}`,
             ``,
             `> ℹ️ The Nom Key is SAP's internal identifier used for status tracking, event management and downstream documents. The number range **OIJNOM** must be configured in SPRO → TSW → Nomination for unique keys.`,
             `- **Transport System:** ${form.Transportsystem}`,

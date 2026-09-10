@@ -138,6 +138,10 @@ service ReconciliationService @(path: '/reconciliation')
     success          : Boolean;
     Nominationnumber : String(20);
     NomKey           : String(20);
+    TransportSystem  : String(10);
+    NominationType   : String(4);
+    ModeOfTransport  : String(2);
+    NominationStatus : String(1);
     message          : String;
   };
 
