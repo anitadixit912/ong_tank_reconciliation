@@ -562,7 +562,9 @@ export default function NominationEta() {
             `- **Items (${verifiedItems.length || items.length}):**`,
             itemLines,
             ``,
-            `Would you like me to propose an ETA for nomination **${(nomKey || '').replace(/^[$0]+/, '') || nomNumber || nomKey}**? _(Transport System: ${verifiedTS}, Material: ${verifiedItems.length > 0 ? verifiedItems[0].material : items[0]?.Demandmaterial || '–'}, Location: ${verifiedItems.length > 0 ? verifiedItems[0].location : items[0]?.Locationid || '–'}, Scheduled Date: ${verifiedItems.length > 0 ? verifiedItems[0].scheduledDate : items[0]?.Scheduleddate || '–'})_`,
+            `Would you like me to propose an ETA for nomination **${(nomKey || '').replace(/^[$0]+/, '') || nomNumber || nomKey}**?`,
+            ``,
+            `> ℹ️ Nomination details: Transport System: **${verifiedTS}** | Nomination Type: **${verifiedType}** | Mode: **${verifiedMOT}** | Material: **${verifiedItems.length > 0 ? verifiedItems[0].material : items[0]?.Demandmaterial || '–'}** | Location: **${verifiedItems.length > 0 ? verifiedItems[0].location : items[0]?.Locationid || '–'}** | Scheduled Date: **${verifiedItems.length > 0 ? verifiedItems[0].scheduledDate : items[0]?.Scheduleddate || '–'}** | Qty: **${verifiedItems.length > 0 ? verifiedItems[0].qty : items[0]?.Nominatedqty || '–'} ${verifiedItems.length > 0 ? verifiedItems[0].uom : items[0]?.Quantityunit || ''}**`,
           ].join('\n'),
         }]);
         setTimeout(() => { setShowCreate(false); setForm(EMPTY_FORM); setItems([{ Itemtype: '', Locationid: '', Demandmaterial: '', Nominatedqty: '', Quantityunit: '', Scheduleddate: '', Documentindicator: 'X', Movementscenario: '' }]); setCreateMsg(null); }, 1500);

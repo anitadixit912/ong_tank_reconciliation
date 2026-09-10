@@ -220,60 +220,63 @@ async function _fetchOpenNominations() {
     if (authHeader) headers['Authorization'] = authHeader;
     const proxyOpts = cfg._proxyHost ? { host: cfg._proxyHost, port: cfg._proxyPort, token: cfg._proxyToken, locationId: cfg._locationId } : null;
 
-    // Try broader I_NominationHeaderFld first (all nominations, not just "My Nominations")
-    // Fall back to C_Oij06_MyNominations if not available
-    let results = [];
     const cp = _sapClientParam(cfg);
     cds.log('s4').info('_fetchOpenNominations: sap-client param=' + (cp || 'NONE'));
 
-    const broadPath = '/sap/opu/odata/sap/TSW_MYNOMINATIONS_SRV_01/I_NominationHeaderFld?$format=json&$orderby=NominationDoc%20desc&$top=500' + cp;
-    const broadRes = await _httpGet(baseUrl + broadPath, headers, proxyOpts);
-    if (broadRes.status === 200) {
-      cds.log('s4').info('_fetchOpenNominations: using I_NominationHeaderFld (all nominations)');
-      results = (JSON.parse(broadRes.body).d?.results) || [];
-    } else {
-      cds.log('s4').warn('I_NominationHeaderFld returned ' + broadRes.status + ' — falling back to C_Oij06_MyNominations');
-      const myPath = '/sap/opu/odata/sap/TSW_MYNOMINATIONS_SRV_01/C_Oij06_MyNominations?$format=json&$orderby=NominationDoc%20desc&$top=500' + cp;
-      const myRes = await _httpGet(baseUrl + myPath, headers, proxyOpts);
-      if (myRes.status !== 200) {
-        cds.log('s4').warn('C_Oij06_MyNominations returned ' + myRes.status);
-        return [];
-      }
-      results = (JSON.parse(myRes.body).d?.results) || [];
-    }
-    return results.map(n => {
-      // Parse OData /Date(ms)/ to YYYY-MM-DD
-      const parseDate = v => {
-        if (!v) return '';
-        const m = String(v).match(/\/Date\((\d+)/);
-        return m ? new Date(parseInt(m[1])).toISOString().slice(0,10) : v;
-      };
-      return {
-        Nominationnumber: n.NominationDoc          || '',
-        Itemnumber:       n.NominationDocItem      || '',
-        Itemstatus:       n.NominationItemStatus   || '',
-        Itemtype:         n.NominationScheduleType || '',
-        Scheduleddate:    parseDate(n.NominationScheduleDate),
-        Locationid:       n.LocationId             || '',
-        Demandmaterial:   n.DemandMaterial         || '',
-        Nominatedqty:     n.ScheduledQuantity       || '',
-        Quantityunit:     n.ScheduledQuantityUnit   || '',
-        Nomstatus:        n.NominationHeaderStatus  || '',
-        Transportsystem:  n.TransportSystem         || '',
-        Nominationtype:   n.NominationType          || '',
-        Modeoftransport:  n.NominationModeOfTransport || '',
-        MaterialDesc:     n.MaterialDesc            || '',
-        LocationName:     n.LocationName            || '',
-        TransportSystemDesc: n.TransportSystemDesc  || '',
-        Carrier:          n.NominationCarrier       || '',
-        CarrierDesc:      n.NominationCarrierDesc   || '',
-        Shipper:          n.NominationShipper       || '',
-        ShipperDesc:      n.NominationShipperDesc   || '',
-        InTransitPlant:   n.InTransitPlant          || '',
-        VehicleId:        n.VehicleId               || '',
-        Nomnr:            n.NominationNumber || n.ExternalNominationNumber || n.Nomnr || '',
-      };
-    });
+    // Fetch items from C_Oij06_MyNominations (has material/location/date but only "my" nominations)
+    // Fetch all headers from I_NominationHeaderFld (all nominations but no items)
+    // Merge: use items data where available, fill gaps with header data
+    let results = [];
+
+    const [itemsRes, headersRes] = await Promise.all([
+      _httpGet(baseUrl + '/sap/opu/odata/sap/TSW_MYNOMINATIONS_SRV_01/C_Oij06_MyNominations?$format=json&$orderby=NominationDoc%20desc&$top=500' + cp, headers, proxyOpts),
+      _httpGet(baseUrl + '/sap/opu/odata/sap/TSW_MYNOMINATIONS_SRV_01/I_NominationHeaderFld?$format=json&$orderby=NominationDoc%20desc&$top=500' + cp, headers, proxyOpts)
+    ]);
+
+    const itemRows    = itemsRes.status === 200   ? (JSON.parse(itemsRes.body).d?.results   || []) : [];
+    const headerRows  = headersRes.status === 200 ? (JSON.parse(headersRes.body).d?.results || []) : [];
+
+    // Build a set of nomination docs already in itemRows
+    const itemNomDocs = new Set(itemRows.map(r => r.NominationDoc));
+
+    // Add header-only nominations (not in itemRows) as header-only entries
+    const headerOnlyRows = headerRows
+      .filter(h => !itemNomDocs.has(h.NominationDoc))
+      .map(h => ({ ...h, _headerOnly: true }));
+
+    results = [...itemRows, ...headerOnlyRows];
+    cds.log('s4').info('_fetchOpenNominations: items=' + itemRows.length + ' headerOnly=' + headerOnlyRows.length + ' total=' + results.length);
+    const parseDate = v => {
+      if (!v) return '';
+      const m = String(v).match(/\/Date\((\d+)/);
+      return m ? new Date(parseInt(m[1])).toISOString().slice(0,10) : v;
+    };
+
+    return results.map(n => ({
+      Nominationnumber: n.NominationDoc                    || '',
+      Itemnumber:       n.NominationDocItem                || '',
+      Itemstatus:       n.NominationItemStatus             || '',
+      Itemtype:         n.NominationScheduleType           || '',
+      Scheduleddate:    parseDate(n.NominationScheduleDate),
+      Locationid:       n.LocationId                       || '',
+      Demandmaterial:   n.DemandMaterial                   || '',
+      Nominatedqty:     n.ScheduledQuantity                || '',
+      Quantityunit:     n.ScheduledQuantityUnit            || '',
+      Nomstatus:        n.NominationHeaderStatus           || '',
+      Transportsystem:  n.TransportSystem                  || '',
+      Nominationtype:   n.NominationType                   || '',
+      Modeoftransport:  n.NominationModeOfTransport        || '',
+      MaterialDesc:     n.MaterialDesc                     || '',
+      LocationName:     n.LocationName                     || '',
+      TransportSystemDesc: n.TransportSystemDesc           || '',
+      Carrier:          n.NominationCarrier                || '',
+      CarrierDesc:      n.NominationCarrierDesc            || '',
+      Shipper:          n.NominationShipper                || '',
+      ShipperDesc:      n.NominationShipperDesc            || '',
+      InTransitPlant:   n.InTransitPlant                   || '',
+      VehicleId:        n.VehicleId                        || '',
+      Nomnr:            n.NominationNumber || n.ExternalNominationNumber || n.Nomnr || '',
+    }));
   } catch (err) {
     cds.log('s4').warn('Failed to fetch nominations: ' + err.message);
     return [];
@@ -1051,6 +1054,7 @@ module.exports = class ReconciliationService extends cds.ApplicationService {
           <SCHEDULEDDATE>${dateFormatted}</SCHEDULEDDATE>
           <LOCATIONID>${item.Locationid || ''}</LOCATIONID>
           <DEMANDMATERIAL>${item.Demandmaterial || ''}</DEMANDMATERIAL>
+          <SCHEDULEMATERIAL>${item.Demandmaterial || ''}</SCHEDULEMATERIAL>
           <NOMINATEDQUANTITY>${parseFloat(item.Nominatedqty) || 0}</NOMINATEDQUANTITY>
           <QUANTITYUNIT_SAP>${item.Quantityunit || ''}</QUANTITYUNIT_SAP>
         </item>`;
