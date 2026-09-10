@@ -1061,13 +1061,13 @@ module.exports = class ReconciliationService extends cds.ApplicationService {
           || new URL(baseUrl).searchParams?.get('sap-client')
           || '';
         const clientParam = sapClient ? '&sap-client=' + sapClient : '';
-        const soapUrl = baseUrl + '/sap/bc/soap/rfc?services=RFC_TSW_NOM_CREATEFROMDATA' + clientParam;
+        const soapUrl = baseUrl + '/sap/bc/soap/rfc?services=Z_TSW_NOM_CREATE_COMMIT' + clientParam;
 
         const soapBody = `<?xml version="1.0" encoding="UTF-8"?>
 <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:urn="urn:sap-com:document:sap:rfc:functions">
   <soapenv:Header/>
   <soapenv:Body>
-    <urn:RFC_TSW_NOM_CREATEFROMDATA>
+    <urn:Z_TSW_NOM_CREATE_COMMIT>
       <HEADERDATA_IN>
         <NOMINATIONNUMBER_EXT>${Nominationnumber || ''}</NOMINATIONNUMBER_EXT>
         <TRANSPORTSYSTEM>${Transportsystem || ''}</TRANSPORTSYSTEM>
@@ -1080,14 +1080,14 @@ module.exports = class ReconciliationService extends cds.ApplicationService {
       <NOMINATIONITEM_IN>
         ${itemsXml}
       </NOMINATIONITEM_IN>
-    </urn:RFC_TSW_NOM_CREATEFROMDATA>
+    </urn:Z_TSW_NOM_CREATE_COMMIT>
   </soapenv:Body>
 </soapenv:Envelope>`;
 
         const nomListHeaders = { Accept: 'application/json' };
         if (authHeader) nomListHeaders['Authorization'] = authHeader;
 
-        const soapHeaders = { 'Content-Type': 'text/xml; charset=utf-8', 'SOAPAction': 'RFC_TSW_NOM_CREATEFROMDATA' };
+        const soapHeaders = { 'Content-Type': 'text/xml; charset=utf-8', 'SOAPAction': 'Z_TSW_NOM_CREATE_COMMIT' };
         if (authHeader) soapHeaders['Authorization'] = authHeader;
 
         // Fetch CSRF token — SAP SOAP gateway requires it for state-changing RFCs
@@ -1158,21 +1158,8 @@ module.exports = class ReconciliationService extends cds.ApplicationService {
           const nomDisplay = nomNumber ? (nomNumber.replace(/^[$0]+/, '') || nomNumber) : '';
           cds.log('s4').info('createNomination: extracted nomNumber=' + (nomNumber || 'NOT FOUND') + ' nomDisplay=' + nomDisplay);
 
-          // Commit the transaction — RFC does not auto-commit (SAP BAPI pattern)
-          const commitBody = `<?xml version="1.0" encoding="UTF-8"?>
-<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:urn="urn:sap-com:document:sap:rfc:functions">
-  <soapenv:Header/><soapenv:Body>
-    <urn:BAPI_TRANSACTION_COMMIT><WAIT>X</WAIT></urn:BAPI_TRANSACTION_COMMIT>
-  </soapenv:Body>
-</soapenv:Envelope>`;
-          const commitUrl = baseUrl + '/sap/bc/soap/rfc?services=BAPI_TRANSACTION_COMMIT' + clientParam;
-          try {
-            const commitHeaders = { ...soapHeaders, 'SOAPAction': 'BAPI_TRANSACTION_COMMIT', 'SAP-Session': 'close' };
-            const commitRes = await _httpPost(commitUrl, commitBody, commitHeaders, proxyOpts);
-            cds.log('s4').info('createNomination: COMMIT status=' + commitRes.status + ' body=' + commitRes.body.slice(0, 200));
-          } catch (commitErr) {
-            cds.log('s4').warn('createNomination: COMMIT failed: ' + commitErr.message);
-          }
+          // COMMIT WORK AND WAIT is now handled inside Z_TSW_NOM_CREATE_COMMIT
+          cds.log('s4').info('createNomination: commit handled by Z_TSW_NOM_CREATE_COMMIT wrapper FM');
 
           // Extract verified data directly from SOAP response — no extra OData call needed
           const _extractSoap = (tag) => {
