@@ -757,7 +757,7 @@ export default function NominationEta() {
                     </Select>
                   </div>
                   <div>
-                    <Label>Movement Scenario</Label>
+                    <Label>Shipping Type (Movement Scenario)</Label>
                     <Select style={{ width: '100%' }} onChange={e => setItemField(idx, 'Movementscenario', e.detail.selectedOption.value)}>
                       <Option value="">-- Select --</Option>
                       {(valueHelps.movementScenarios || []).map(m => (
