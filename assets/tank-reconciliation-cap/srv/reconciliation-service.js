@@ -963,7 +963,7 @@ module.exports = class ReconciliationService extends cds.ApplicationService {
         return [];
       };
 
-      const [locations, materials, transportSystems, quantityUnits, nominationTypes, itemTypes, modesOfTransport, movementScenarios] = await Promise.all([
+      const [locations, materials, transportSystems, quantityUnits, nominationTypes, itemTypes, modesOfTransport] = await Promise.all([
         _vhFetch('I_LocationIdVH',                r => r.LocationId         ? { Locationid: r.LocationId, Description: r.LocationName || r.LocationId } : null),
         _vhFetch('I_ScheduledMaterialVH',         r => r.ScheduledMaterial  ? { Demandmaterial: r.ScheduledMaterial, Description: r.MaterialDesc || r.ScheduledMaterial } : null),
         _vhFetch('I_NominationTransptSystVH',     r => r.TransportSystem    ? { Transportsystem: r.TransportSystem, Description: r.TransportSystemName || r.TransportSystem } : null),
@@ -971,33 +971,12 @@ module.exports = class ReconciliationService extends cds.ApplicationService {
         _vhFetch('I_NominationTypeVH',            r => r.NominationType     ? { Nominationtype: r.NominationType, Description: r.NominationTypeDescription || r.NominationType } : null),
         _vhFetch('SITYPSet',                      r => r.Sityp ? { Itemtype: r.Sityp, Description: r.Description || r.Ltx || r.Kbez || r.Sityp } : null),
         _vhFetch('I_NominationModeOfTranspVH',    r => r.ModeOfTransport    ? { ModeOfTransport: r.ModeOfTransport, Description: r.ModeOfTransportDesc || r.ModeOfTransport } : null),
-        // NMSHTYPESet = Shipping Type value help in TSW — log keys to find correct field names
-        (async () => {
-          try {
-            const r = await _httpGet(baseUrl + BASE + '/NMSHTYPESet?$format=json&$top=200' + sapClientParam, headers, proxyOpts);
-            if (r.status === 200) {
-              const rows = JSON.parse(r.body).d?.results || [];
-              if (rows.length) {
-                const keys = Object.keys(rows[0]).filter(k => k !== '__metadata');
-                cds.log('s4').info('NMSHTYPESet keys: ' + keys.join(', ') + ' | sample: ' + JSON.stringify(rows[0]));
-                return rows.map(r => {
-                  const codeKey = keys.find(k => /shtype|shtyp|code|type/i.test(k)) || keys[0];
-                  const descKey = keys.find(k => /desc|text|name|txt/i.test(k)) || keys[1];
-                  return r[codeKey] ? { Movementscenario: r[codeKey], Description: r[descKey] || r[codeKey] } : null;
-                }).filter(Boolean);
-              }
-              cds.log('s4').warn('NMSHTYPESet returned 0 rows');
-            } else {
-              cds.log('s4').warn('NMSHTYPESet returned ' + r.status);
-            }
-          } catch(e) { cds.log('s4').warn('NMSHTYPESet failed: ' + e.message); }
-          return [];
-        })(),
+
       ]);
 
-      cds.log('s4').info('ValueHelps: loc=' + locations.length + ' mat=' + materials.length + ' ts=' + transportSystems.length + ' uom=' + quantityUnits.length + ' nt=' + nominationTypes.length + ' it=' + itemTypes.length + ' mot=' + modesOfTransport.length + ' mvt=' + movementScenarios.length);
+      cds.log('s4').info('ValueHelps: loc=' + locations.length + ' mat=' + materials.length + ' ts=' + transportSystems.length + ' uom=' + quantityUnits.length + ' nt=' + nominationTypes.length + ' it=' + itemTypes.length + ' mot=' + modesOfTransport.length);
 
-      return { locations, materials, transportSystems, quantityUnits, nominationTypes, itemTypes, modesOfTransport, movementScenarios };
+      return { locations, materials, transportSystems, quantityUnits, nominationTypes, itemTypes, modesOfTransport };
     });
 
     // ── getCarrierShipperByTS ────────────────────────────────────────────────
@@ -1067,7 +1046,7 @@ module.exports = class ReconciliationService extends cds.ApplicationService {
           <ITEMNUMBER>${itemNo}</ITEMNUMBER>
           <ITEMTYPE>${item.Itemtype || 'D'}</ITEMTYPE>
           <ITEMSTATUS>1</ITEMSTATUS>
-          <SHIPPINGTYPE>${item.Movementscenario || ''}</SHIPPINGTYPE>
+
           <DOCUMENTINDICATOR>${item.Documentindicator || 'X'}</DOCUMENTINDICATOR>
           <SCHEDULEDDATE>${dateFormatted}</SCHEDULEDDATE>
           <LOCATIONID>${item.Locationid || ''}</LOCATIONID>
@@ -1129,6 +1108,7 @@ module.exports = class ReconciliationService extends cds.ApplicationService {
         // Use SAP stateful session — RFC and COMMIT must run in same session
         soapHeaders['SAP-Session'] = 'stateful';
 
+        cds.log('s4').info('createNomination: SOAP request body=' + soapBody.slice(0, 3000));
         cds.log('s4').info('createNomination: calling RFC via SOAP (stateful session)');
         const soapRes = await _httpPost(soapUrl, soapBody, soapHeaders, proxyOpts);
         cds.log('s4').info('createNomination: SOAP status=' + soapRes.status + ' body=' + soapRes.body.slice(0, 5000));
