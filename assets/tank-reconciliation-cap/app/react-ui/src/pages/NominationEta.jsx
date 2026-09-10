@@ -126,15 +126,23 @@ function ETAProposalCard({ text, onApprove, onReject, onClose }) {
     return '';
   };
 
-  const nomNum      = extract([/Nomination\s+#?(\S+)/i, /nomination number[:\s]+#?(\S+)/i]);
-  const eta         = extract([/Recommended ETA[:\s]+([0-9-]+)/i, /✅ Recommended ETA[:\s]+([0-9-]+)/i, /Final ETA[:\s]+([0-9-]+)/i, /ETA[:\s]+([0-9]{4}-[0-9]{2}-[0-9]{2})/]);
-  const confidence  = extract([/Confidence[:\s]+(High|Medium|Low)/i, /📊 Confidence[:\s]+(High|Medium|Low)/i]);
-  const material    = extract([/Material[:\s]+([^\n|]+)/i]);
-  const transport   = extract([/Transport(?:\s+System)?[:\s]+([^\n|]+)/i, /Transport[:\s]+([^\n|]+)/i]);
-  const origin      = extract([/Origin[:\s]+([^\n|]+)/i]);
-  const destination = extract([/Destination[:\s]+([^\n|]+)/i]);
-  const vessel      = extract([/Vessel[:\s]+([^\n|]+)/i]);
-  const route       = extract([/Route[:\s]+([^\n]+)/i, /🗺 Route[:\s]+([^\n]+)/i]);
+  const nomNum      = extract([/Nomination\s+#?(\d+)/i, /nomination number[:\s]+#?(\S+)/i]);
+  const eta         = extract([
+    /Recommended ETA[:\s]+([0-9]{4}-[0-9]{2}-[0-9]{2})/i,
+    /Final ETA[:\s]+([0-9]{4}-[0-9]{2}-[0-9]{2})/i,
+    /ETA[:\s]+([0-9]{4}-[0-9]{2}-[0-9]{2})/i,
+    /Base.*?([0-9]{4}-[0-9]{2}-[0-9]{2})/i,
+  ]);
+  const confidence  = extract([
+    /Confidence[:\s]+(High|Medium|Low)/i,
+    /confidence[^\n]*(High|Medium|Low)/i,
+  ]);
+  const material    = extract([/Material[:\s]+([^\n|✅📊🗺📡💡⚠]+)/i]);
+  const transport   = extract([/Transport(?:\s+System)?[:\s]+([^\n|✅📊🗺📡💡⚠]+)/i]);
+  const origin      = extract([/Origin[:\s]+([^\n|✅📊🗺📡💡⚠]+)/i]);
+  const destination = extract([/Destination[:\s]+([^\n|✅📊🗺📡💡⚠]+)/i]);
+  const vessel      = extract([/Vessel(?:\s+Name)?[:\s]+([A-Z][^\n|]{2,30})/i]);
+  const route       = extract([/Route[:\s]+([^\n✅📊🗺📡💡⚠]+)/i, /🗺\s*Route[:\s]+([^\n]+)/i]);
 
   // Extract reasoning — text after "AGENT REASONING" or "Note:" section
   const reasoningMatch = text.match(/(?:reasoning|note)[:\s]*([^\n]+(?:\n(?![A-Z#*])[^\n]+)*)/i);
