@@ -562,7 +562,7 @@ export default function NominationEta() {
             `- **Items (${verifiedItems.length || items.length}):**`,
             itemLines,
             ``,
-            `Would you like me to propose an ETA for nomination **${(nomKey || '').replace(/^[$0]+/, '') || nomNumber || nomKey}**?`,
+            `Would you like me to propose an ETA for nomination **${(nomKey || '').replace(/^[$0]+/, '') || nomNumber || nomKey}**? _(Transport System: ${verifiedTS}, Material: ${verifiedItems.length > 0 ? verifiedItems[0].material : items[0]?.Demandmaterial || '–'}, Location: ${verifiedItems.length > 0 ? verifiedItems[0].location : items[0]?.Locationid || '–'}, Scheduled Date: ${verifiedItems.length > 0 ? verifiedItems[0].scheduledDate : items[0]?.Scheduleddate || '–'})_`,
           ].join('\n'),
         }]);
         setTimeout(() => { setShowCreate(false); setForm(EMPTY_FORM); setItems([{ Itemtype: '', Locationid: '', Demandmaterial: '', Nominatedqty: '', Quantityunit: '', Scheduleddate: '', Documentindicator: 'X', Movementscenario: '' }]); setCreateMsg(null); }, 1500);
