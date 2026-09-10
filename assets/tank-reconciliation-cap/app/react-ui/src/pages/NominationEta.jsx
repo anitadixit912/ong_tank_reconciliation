@@ -839,8 +839,37 @@ export default function NominationEta() {
           })}
           {loading && (
             <FlexBox direction="Row" justifyContent="Start">
-              <div style={{ padding: '0.6rem 1rem', borderRadius: '1rem', background: '#f5f5f5' }}>
-                <BusyIndicator size="Small" active />
+              <div style={{
+                padding: '0.85rem 1.5rem',
+                borderRadius: '1rem 1rem 1rem 0.25rem',
+                background: 'linear-gradient(135deg, #0050b3 0%, #0070f2 100%)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.85rem',
+                boxShadow: '0 4px 16px rgba(0,80,179,0.35)',
+                animation: 'pulse 1.5s ease-in-out infinite',
+              }}>
+                <style>{`
+                  @keyframes pulse {
+                    0%, 100% { opacity: 1; }
+                    50% { opacity: 0.75; }
+                  }
+                  @keyframes spin {
+                    0% { transform: rotate(0deg); }
+                    100% { transform: rotate(360deg); }
+                  }
+                `}</style>
+                <div style={{
+                  width: '20px', height: '20px',
+                  border: '3px solid rgba(255,255,255,0.3)',
+                  borderTop: '3px solid #ffffff',
+                  borderRadius: '50%',
+                  animation: 'spin 0.8s linear infinite',
+                  flexShrink: 0,
+                }} />
+                <div style={{ fontSize: '0.875rem', color: '#ffffff', fontWeight: 600 }}>
+                  🤖 Agent is thinking… gathering SAP, vessel tracking & geopolitical data
+                </div>
               </div>
             </FlexBox>
           )}
