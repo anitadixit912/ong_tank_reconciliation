@@ -971,8 +971,28 @@ module.exports = class ReconciliationService extends cds.ApplicationService {
         _vhFetch('I_NominationTypeVH',            r => r.NominationType     ? { Nominationtype: r.NominationType, Description: r.NominationTypeDescription || r.NominationType } : null),
         _vhFetch('SITYPSet',                      r => r.Sityp ? { Itemtype: r.Sityp, Description: r.Description || r.Ltx || r.Kbez || r.Sityp } : null),
         _vhFetch('I_NominationModeOfTranspVH',    r => r.ModeOfTransport    ? { ModeOfTransport: r.ModeOfTransport, Description: r.ModeOfTransportDesc || r.ModeOfTransport } : null),
-        // NMSHTYPESet = Shipping Type / Movement Scenario value help in TSW
-        _vhFetch('NMSHTYPESet', r => r.Shtype ? { Movementscenario: r.Shtype, Description: r.Sshtxt || r.Shtype } : null),
+        // NMSHTYPESet = Shipping Type value help in TSW — log keys to find correct field names
+        (async () => {
+          try {
+            const r = await _httpGet(baseUrl + BASE + '/NMSHTYPESet?$format=json&$top=200' + sapClientParam, headers, proxyOpts);
+            if (r.status === 200) {
+              const rows = JSON.parse(r.body).d?.results || [];
+              if (rows.length) {
+                const keys = Object.keys(rows[0]).filter(k => k !== '__metadata');
+                cds.log('s4').info('NMSHTYPESet keys: ' + keys.join(', ') + ' | sample: ' + JSON.stringify(rows[0]));
+                return rows.map(r => {
+                  const codeKey = keys.find(k => /shtype|shtyp|code|type/i.test(k)) || keys[0];
+                  const descKey = keys.find(k => /desc|text|name|txt/i.test(k)) || keys[1];
+                  return r[codeKey] ? { Movementscenario: r[codeKey], Description: r[descKey] || r[codeKey] } : null;
+                }).filter(Boolean);
+              }
+              cds.log('s4').warn('NMSHTYPESet returned 0 rows');
+            } else {
+              cds.log('s4').warn('NMSHTYPESet returned ' + r.status);
+            }
+          } catch(e) { cds.log('s4').warn('NMSHTYPESet failed: ' + e.message); }
+          return [];
+        })(),
       ]);
 
       cds.log('s4').info('ValueHelps: loc=' + locations.length + ' mat=' + materials.length + ' ts=' + transportSystems.length + ' uom=' + quantityUnits.length + ' nt=' + nominationTypes.length + ' it=' + itemTypes.length + ' mot=' + modesOfTransport.length + ' mvt=' + movementScenarios.length);
