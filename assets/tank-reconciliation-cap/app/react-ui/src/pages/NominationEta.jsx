@@ -550,7 +550,7 @@ export default function NominationEta() {
           text: [
             `✅ **Nomination Created Successfully** _(verified from SAP)_`,
             ``,
-            `- **Nom Key (NOMTK):** \`${nomKey}\` _(system-generated — use this for ETA proposals and all SAP processing)_`,
+            `- **Nom Key (NOMTK):** \`${(nomKey || '').replace(/^[$0]+/, '') || nomKey}\` _(system-generated — use this for ETA proposals and all SAP processing)_`,
             `- **Nom Number (NOMNR):** ${nomNumber || '–'} _(user-defined business reference, non-unique)_`,
             `- **Transport System:** ${verifiedTS}`,
             `- **Nomination Type:** ${verifiedType}`,
@@ -562,7 +562,7 @@ export default function NominationEta() {
             `- **Items (${verifiedItems.length || items.length}):**`,
             itemLines,
             ``,
-            `Would you like me to propose an ETA for nomination **${nomKey || nomNumber}**? _(using Nom Key as the system identifier)_`,
+            `Would you like me to propose an ETA for nomination **${(nomKey || '').replace(/^[$0]+/, '') || nomNumber || nomKey}**?`,
           ].join('\n'),
         }]);
         setTimeout(() => { setShowCreate(false); setForm(EMPTY_FORM); setItems([{ Itemtype: '', Locationid: '', Demandmaterial: '', Nominatedqty: '', Quantityunit: '', Scheduleddate: '', Documentindicator: 'X' }]); setCreateMsg(null); }, 1500);

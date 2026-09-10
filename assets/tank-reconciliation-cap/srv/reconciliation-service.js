@@ -220,15 +220,27 @@ async function _fetchOpenNominations() {
     if (authHeader) headers['Authorization'] = authHeader;
     const proxyOpts = cfg._proxyHost ? { host: cfg._proxyHost, port: cfg._proxyPort, token: cfg._proxyToken, locationId: cfg._locationId } : null;
 
-    const path = '/sap/opu/odata/sap/TSW_MYNOMINATIONS_SRV_01/C_Oij06_MyNominations?$format=json&$orderby=NominationDoc%20desc&$top=500' + _sapClientParam(cfg);
-    cds.log('s4').info('_fetchOpenNominations: sap-client param=' + (_sapClientParam(cfg) || 'NONE'));
-    const res = await _httpGet(baseUrl + path, headers, proxyOpts);
-    if (res.status !== 200) {
-      cds.log('s4').warn('C_Oij06_MyNominations returned ' + res.status);
-      return [];
+    // Try broader I_NominationHeaderFld first (all nominations, not just "My Nominations")
+    // Fall back to C_Oij06_MyNominations if not available
+    let results = [];
+    const cp = _sapClientParam(cfg);
+    cds.log('s4').info('_fetchOpenNominations: sap-client param=' + (cp || 'NONE'));
+
+    const broadPath = '/sap/opu/odata/sap/TSW_MYNOMINATIONS_SRV_01/I_NominationHeaderFld?$format=json&$orderby=NominationDoc%20desc&$top=500' + cp;
+    const broadRes = await _httpGet(baseUrl + broadPath, headers, proxyOpts);
+    if (broadRes.status === 200) {
+      cds.log('s4').info('_fetchOpenNominations: using I_NominationHeaderFld (all nominations)');
+      results = (JSON.parse(broadRes.body).d?.results) || [];
+    } else {
+      cds.log('s4').warn('I_NominationHeaderFld returned ' + broadRes.status + ' — falling back to C_Oij06_MyNominations');
+      const myPath = '/sap/opu/odata/sap/TSW_MYNOMINATIONS_SRV_01/C_Oij06_MyNominations?$format=json&$orderby=NominationDoc%20desc&$top=500' + cp;
+      const myRes = await _httpGet(baseUrl + myPath, headers, proxyOpts);
+      if (myRes.status !== 200) {
+        cds.log('s4').warn('C_Oij06_MyNominations returned ' + myRes.status);
+        return [];
+      }
+      results = (JSON.parse(myRes.body).d?.results) || [];
     }
-    const payload = JSON.parse(res.body);
-    const results = (payload.d && payload.d.results) ? payload.d.results : [];
     return results.map(n => {
       // Parse OData /Date(ms)/ to YYYY-MM-DD
       const parseDate = v => {
