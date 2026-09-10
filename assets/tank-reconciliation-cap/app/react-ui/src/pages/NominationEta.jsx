@@ -529,10 +529,12 @@ export default function NominationEta() {
       if (result?.success) {
         const nomNumber = result.Nominationnumber || form.Nominationnumber || '';
         const nomKey    = result.NomKey || '';
-        const verifiedTS    = result.TransportSystem  || form.Transportsystem;
-        const verifiedType  = result.NominationType   || form.Nominationtype;
-        const verifiedMOT   = result.ModeOfTransport  || form.Modeoftransport;
-        const verifiedStatus = result.NominationStatus || '1';
+        const verifiedTS      = result.TransportSystem  || form.Transportsystem;
+        const verifiedType    = result.NominationType   || form.Nominationtype;
+        const verifiedMOT     = result.ModeOfTransport  || form.Modeoftransport;
+        const verifiedStatus  = result.NominationStatus || '1';
+        const verifiedCarrier = result.Carrier || form.Carrier || '';
+        const verifiedShipper = result.Shipper || form.Shipper || '';
         let verifiedItems = [];
         try { verifiedItems = JSON.parse(result.VerifiedItems || '[]'); } catch(_) {}
         const itemLines = verifiedItems.length > 0
@@ -555,8 +557,8 @@ export default function NominationEta() {
             `- **Mode of Transport:** ${verifiedMOT}`,
             `- **Status:** ${verifiedStatus === '1' ? '🟢 Open' : verifiedStatus}`,
             `- **Vehicle ID:** ${form.Vehicleid || '–'}`,
-            `- **Carrier:** ${form.Carrier ? `${form.Carrier}${form.CarrierName ? ' — ' + form.CarrierName : ''}` : '–'}`,
-            `- **Shipper:** ${form.Shipper ? `${form.Shipper}${form.ShipperName ? ' — ' + form.ShipperName : ''}` : '–'}`,
+            `- **Carrier:** ${verifiedCarrier ? `${verifiedCarrier}${form.CarrierName ? ' — ' + form.CarrierName : ''}` : '–'}`,
+            `- **Shipper:** ${verifiedShipper ? `${verifiedShipper}${form.ShipperName ? ' — ' + form.ShipperName : ''}` : '–'}`,
             `- **Items (${verifiedItems.length || items.length}):**`,
             itemLines,
             ``,

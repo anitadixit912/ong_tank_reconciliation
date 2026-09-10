@@ -1150,10 +1150,12 @@ module.exports = class ReconciliationService extends cds.ApplicationService {
             const m = soapRes.body.match(new RegExp('<(?:\\w+:)?' + tag + '[^>]*>([^<]*)<\\/(?:\\w+:)?' + tag + '>', 'i'));
             return m ? m[1].trim() : '';
           };
-          const verifiedTS    = _extractSoap('TRANSPORTSYSTEM') || Transportsystem || '';
-          const verifiedMOT   = _extractSoap('MODOFTRANSPORT')  || Modeoftransport || '';
-          const verifiedType  = _extractSoap('NOMINATIONTYPE')  || Nominationtype  || '';
-          const verifiedStatus = _extractSoap('NOMINATIONSTATUS') || '1';
+          const verifiedTS      = _extractSoap('TRANSPORTSYSTEM') || Transportsystem || '';
+          const verifiedMOT     = _extractSoap('MODOFTRANSPORT')  || Modeoftransport || '';
+          const verifiedType    = _extractSoap('NOMINATIONTYPE')  || Nominationtype  || '';
+          const verifiedStatus  = _extractSoap('NOMINATIONSTATUS') || '1';
+          const verifiedCarrier = _extractSoap('CARRIER') || Carrier || '';
+          const verifiedShipper = _extractSoap('SHIPPER') || Shipper || '';
 
           // Extract items from SOAP response
           const itemMatches = [...soapRes.body.matchAll(/<item>([\s\S]*?)<\/item>/gi)];
@@ -1181,6 +1183,8 @@ module.exports = class ReconciliationService extends cds.ApplicationService {
             NominationType:   verifiedType,
             ModeOfTransport:  verifiedMOT,
             NominationStatus: verifiedStatus,
+            Carrier:          verifiedCarrier,
+            Shipper:          verifiedShipper,
             VerifiedItems:    JSON.stringify(verifiedItems),
             message: `Nomination created successfully. Nom Number: ${Nominationnumber || '–'} | Nom Key: ${nomNumber}`
           };
