@@ -1110,7 +1110,7 @@ module.exports = class ReconciliationService extends cds.ApplicationService {
         }
 
         // Use SAP stateful session — RFC and COMMIT must run in same session
-        soapHeaders['SAP-Session'] = 'stateful';
+        // Z_TSW_NOM_CREATE_COMMIT handles COMMIT internally — no stateful session needed
 
         cds.log('s4').info('createNomination: SOAP request body=' + soapBody.slice(0, 3000));
         cds.log('s4').info('createNomination: calling RFC via SOAP (stateful session)');
