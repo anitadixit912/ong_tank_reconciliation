@@ -876,7 +876,7 @@ export default function NominationEta() {
                   flexShrink: 0,
                 }} />
                 <div style={{ fontSize: '0.875rem', color: '#ffffff', fontWeight: 600 }}>
-                  🤖 Agent is thinking… gathering SAP, vessel tracking & geopolitical data
+                  🤖 Agent is thinking… gathering SAP, vessel tracking, geopolitical & historical data
                 </div>
               </div>
             </FlexBox>
