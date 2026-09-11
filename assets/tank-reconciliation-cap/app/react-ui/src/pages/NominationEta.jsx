@@ -117,95 +117,154 @@ function MarkdownText({ text }) {
 
 // ── ETA Proposal Card ─────────────────────────────────────────────────────────
 function ETAProposalCard({ text, onApprove, onReject, onClose }) {
-  // Parse key fields from the agent's markdown ETA report
   const extract = (patterns) => {
     for (const p of patterns) {
       const m = text.match(p);
-      if (m) return m[1]?.trim() || '';
+      if (m) return m[1]?.trim().replace(/[*_`]/g, '') || '';
     }
     return '';
   };
 
-  const nomNum      = extract([/Nomination\s+#?(\d+)/i, /nomination number[:\s]+#?(\S+)/i]);
-  const eta         = extract([
+  const extractSection = (label) => {
+    const re = new RegExp(label + '[:\\s]*([^\\n]+(?:\\n(?![#\\-*A-Z])[^\\n]+)*)', 'i');
+    const m = text.match(re);
+    return m ? m[1].trim().replace(/[*_`#]/g, '').trim() : '';
+  };
+
+  const nomNum    = extract([/Nomination\s+#?(\d+)/i, /nomination number[:\s]+#?(\S+)/i]);
+  // Extract ETA — with optional time component
+  const etaRaw    = extract([
+    /Recommended ETA[:\s]+([0-9]{4}-[0-9]{2}-[0-9]{2}[T\s][0-9:]+)/i,
+    /Final ETA[:\s]+([0-9]{4}-[0-9]{2}-[0-9]{2}[T\s][0-9:]+)/i,
+    /ETA[:\s]+([0-9]{4}-[0-9]{2}-[0-9]{2}[T\s][0-9:]+)/i,
     /Recommended ETA[:\s]+([0-9]{4}-[0-9]{2}-[0-9]{2})/i,
     /Final ETA[:\s]+([0-9]{4}-[0-9]{2}-[0-9]{2})/i,
     /ETA[:\s]+([0-9]{4}-[0-9]{2}-[0-9]{2})/i,
-    /Base.*?([0-9]{4}-[0-9]{2}-[0-9]{2})/i,
   ]);
-  const confidence  = extract([
-    /Confidence[:\s]+(High|Medium|Low)/i,
-    /confidence[^\n]*(High|Medium|Low)/i,
-  ]);
-  const clean = (v) => (v || '').replace(/[*_`#]/g, '').trim();
-  const material      = clean(extract([/Material[:\s]+([^\n|•\-\*]+)/i]));
-  const transport     = clean(extract([/Transport(?:\s+System)?[:\s]+([^\n|•\-\*]+)/i]));
-  const origin        = clean(extract([/Origin[:\s]+([^\n|•→\-\*]+)/i]));
-  const destination   = clean(extract([/Destination[:\s]+([^\n|•→\-\*]+)/i]));
-  const location      = clean(extract([/Location(?:\s+ID)?[:\s]+([^\n|•\-\*]+)/i]));
-  const scheduledDate = clean(extract([/Scheduled\s*Date[:\s]+([0-9]{4}-[0-9]{2}-[0-9]{2})/i, /Schedule[dD][:\s]+([0-9]{4}-[0-9]{2}-[0-9]{2})/i]));
-  const quantity      = clean(extract([/Quantit(?:y|ies)[:\s]+([\d,.]+ *(?:BBL|MT|TO|KG|LT|bbl|mt))/i, /Nominated[:\s]+([\d,.]+ *(?:BBL|MT|TO|KG|LT))/i]));
-  const carrier       = clean(extract([/Carrier[:\s]+([^\n|•\-\*,]+)/i]));
-  const shipper       = clean(extract([/Shipper[:\s]+([^\n|•\-\*,]+)/i]));
-  const rawVessel     = clean(extract([/Vessel(?:\s+Name)?[:\s]+([^\n|•\-\*]{3,30})/i]));
-  const vesselClean   = rawVessel && !rawVessel.toLowerCase().includes('track') && !rawVessel.toLowerCase().includes('no ') && !rawVessel.toLowerCase().includes('tbn') ? rawVessel : null;
-  const route         = clean(extract([/Route[:\s]+([^\n|•\-\*]+)/i]));
+  const etaDate   = etaRaw ? (() => {
+    try {
+      const d = new Date(etaRaw.replace(' ', 'T'));
+      const hasTime = /[T\s][0-9]{2}:[0-9]{2}/.test(etaRaw);
+      return hasTime
+        ? d.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' }) + ', ' + d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+        : d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+    } catch(_) { return etaRaw; }
+  })() : '—';
+  const confidence = extract([/Confidence[:\s]+(High|Medium|Low)/i, /confidence[^\n]*(High|Medium|Low)/i]);
 
-  // Extract reasoning
-  const reasoningMatch = text.match(/(?:reasoning|basis|note)[:\s]*([^\n]{20,}(?:\n(?![A-Z#*•])[^\n]+)*)/i);
-  const reasoning = reasoningMatch ? reasoningMatch[1].trim() : '';
+  // Nomination details — only short clean values
+  const material  = extract([/Material[:\s]+([A-Z0-9_\-\s]{2,40}?)(?:\n|$|\|)/i]);
+  const transport = extract([/Transport(?:\s+System)?[:\s]+([A-Z0-9_\-\s]{2,40}?)(?:\n|$|\|)/i]);
+  const origin    = extract([/Origin[:\s]+([A-Z0-9_\-\s]{2,30}?)(?:\n|$|\|→)/i]);
+  const dest      = extract([/Destination[:\s]+([A-Z0-9_\-\s]{2,30}?)(?:\n|$|\|→)/i]);
+  const vessel    = extract([/Vessel(?:\s+Name)?[:\s]+([A-Z][A-Z0-9\s\-]{2,25}?)(?:\n|$|\|)/i]);
+  const vesselOk  = vessel && !vessel.toLowerCase().includes('track') && vessel.toUpperCase() !== 'TBN' ? vessel : null;
+  const schedDate = extract([/Scheduled\s*Date[:\s]+([0-9]{4}-[0-9]{2}-[0-9]{2})/i]);
+  const qty       = extract([/Quantit(?:y|ies)[:\s]+([\d,.]+ *(?:BBL|MT|TO|KG|LT))/i]);
+
+  // Supporting evidence — extract just first sentence (before period or newline)
+  const getFirstSentence = (val) => {
+    if (!val) return '';
+    const s = val.split(/[.\n]/)[0].trim();
+    return s.length > 80 ? s.slice(0, 80) + '…' : s;
+  };
+
+  const historicalRaw = extractSection('Historical');
+  const historical    = historicalRaw
+    ? (historicalRaw.toLowerCase().includes('no ') || historicalRaw.toLowerCase().includes('insufficient') || historicalRaw.toLowerCase().includes('not available')
+        ? 'No historical data available'
+        : getFirstSentence(historicalRaw))
+    : 'No historical data';
+
+  const aisRaw = extractSection('(?:AIS|Live Vessel|Vessel Position|Vessel Tracking)');
+  const ais    = aisRaw
+    ? (aisRaw.toLowerCase().includes('not configured') || aisRaw.toLowerCase().includes('unavailable') || aisRaw.toLowerCase().includes('no api')
+        ? 'AIS data unavailable'
+        : getFirstSentence(aisRaw))
+    : 'AIS data unavailable';
+
+  const riskRaw = extractSection('(?:Geopolitical|Risk|Route Risk)');
+  const risk    = riskRaw
+    ? getFirstSentence(riskRaw)
+    : 'Risk data unavailable';
+
+  // Agent reasoning — full text
+  const reasoningMatch2 = text.match(/(?:ETA\s+)?(?:reasoning|basis|recommendation)[:\s]*([^\n]{15,}(?:\n(?![#\-*A-Z•])[^\n]+)*)/i);
+  const reasoningRaw = reasoningMatch2 ? reasoningMatch2[1].trim().replace(/[*_`#]/g, '') : '';
+  const reasoning    = reasoningRaw || 'No reasoning available.';
 
   const confidenceColor = confidence === 'High' ? '#1a7a1a' : confidence === 'Medium' ? '#b36b00' : '#c62828';
   const confidenceBg    = confidence === 'High' ? '#e8f5e9' : confidence === 'Medium' ? '#fff8e1' : '#fdecea';
 
+  const SectionLabel = ({ children }) => (
+    <div style={{ fontSize: '0.65rem', color: '#888', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '0.25rem' }}>{children}</div>
+  );
+  const SectionValue = ({ children, muted }) => (
+    <div style={{ fontSize: '0.82rem', fontWeight: muted ? 400 : 600, color: muted ? '#aaa' : '#1d2d3e', fontStyle: muted ? 'italic' : 'normal' }}>{children}</div>
+  );
+
   return (
-    <div style={{ background: '#fff', border: '1px solid #c8d4f0', borderRadius: '12px', overflow: 'hidden', boxShadow: '0 4px 16px rgba(0,0,0,0.10)', maxWidth: '700px', width: '100%' }}>
+    <div style={{ background: '#fff', border: '1px solid #c8d4f0', borderRadius: '12px', overflow: 'hidden', boxShadow: '0 4px 16px rgba(0,0,0,0.10)', maxWidth: '680px', width: '100%' }}>
+
       {/* Header */}
       <div style={{ background: 'linear-gradient(135deg, #0050b3 0%, #0070f2 100%)', padding: '1rem 1.25rem', color: '#fff' }}>
-        <div style={{ fontSize: '0.75rem', opacity: 0.8, marginBottom: '0.25rem', letterSpacing: '0.05em', textTransform: 'uppercase' }}>ETA Proposal — {nomNum || 'Nomination'}</div>
-        <div style={{ fontSize: '1.5rem', fontWeight: 700 }}>📊 Proposed ETA</div>
+        <div style={{ fontSize: '0.72rem', opacity: 0.8, letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: '0.2rem' }}>ETA Proposal — {nomNum || 'Nomination'}</div>
+        <div style={{ fontSize: '1.4rem', fontWeight: 700 }}>📊 Proposed ETA</div>
       </div>
 
       {/* KPIs */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', borderBottom: '1px solid #e8eaf0' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', borderBottom: '2px solid #e8eaf0' }}>
         {[
-          { label: 'PROPOSED ETA', value: eta ? new Date(eta + 'T00:00:00').toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—' },
+          { label: 'PROPOSED ETA', value: etaDate },
           { label: 'CONFIDENCE',   value: confidence || '—', color: confidenceColor, bg: confidenceBg },
           { label: 'STATUS',       value: 'Proposed', color: '#0050b3', bg: '#e8f0fe' },
         ].map((kpi, i) => (
           <div key={i} style={{ padding: '0.75rem 1rem', borderRight: i < 2 ? '1px solid #e8eaf0' : 'none', textAlign: 'center' }}>
-            <div style={{ fontSize: '0.65rem', color: '#888', letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: '0.25rem' }}>{kpi.label}</div>
-            <div style={{ fontWeight: 700, fontSize: '1rem', color: kpi.color || '#1d2d3e', background: kpi.bg, borderRadius: '4px', padding: kpi.bg ? '2px 8px' : '0', display: 'inline-block' }}>{kpi.value}</div>
+            <div style={{ fontSize: '0.62rem', color: '#999', letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: '0.2rem' }}>{kpi.label}</div>
+            <div style={{ fontWeight: 700, fontSize: '1rem', color: kpi.color || '#1d2d3e', background: kpi.bg || 'transparent', borderRadius: '4px', padding: kpi.bg ? '2px 10px' : '0', display: 'inline-block' }}>{kpi.value}</div>
           </div>
         ))}
       </div>
 
-      {/* Reasoning */}
-      {reasoning && (
-        <div style={{ padding: '0.75rem 1.25rem', borderBottom: '1px solid #e8eaf0', background: '#fafbff' }}>
-          <div style={{ fontSize: '0.7rem', color: '#888', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '0.35rem' }}>Agent Reasoning</div>
-          <div style={{ fontSize: '0.82rem', color: '#444', lineHeight: 1.5 }}>{reasoning}</div>
+      {/* Agent Reasoning */}
+      <div style={{ padding: '0.75rem 1.25rem', borderBottom: '1px solid #e8eaf0', background: '#fafbff' }}>
+        <SectionLabel>Agent Reasoning</SectionLabel>
+        <SectionValue muted={!reasoningRaw}>{reasoning}</SectionValue>
+      </div>
+
+      {/* Supporting Evidence */}
+      <div style={{ padding: '0.75rem 1.25rem', borderBottom: '1px solid #e8eaf0' }}>
+        <div style={{ fontSize: '0.7rem', color: '#0050b3', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '0.5rem' }}>Supporting Evidence</div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.75rem' }}>
+          {[
+            { label: '📦 Historical Voyages',        value: historical, muted: historical === 'No historical data available' || historical === 'No historical data' },
+            { label: '🛰 Live Vessel Position (AIS)', value: ais,        muted: ais === 'AIS data unavailable' },
+            { label: '⚠️ Route Risk Assessment',      value: risk,       muted: risk === 'Risk data unavailable' },
+          ].map((e, i) => (
+            <div key={i} style={{ background: '#f8f9fb', borderRadius: '6px', padding: '0.5rem 0.65rem' }}>
+              <SectionLabel>{e.label}</SectionLabel>
+              <SectionValue muted={e.muted}>{e.value}</SectionValue>
+            </div>
+          ))}
         </div>
-      )}
+      </div>
 
       {/* Nomination Details */}
       <div style={{ padding: '0.75rem 1.25rem', borderBottom: '1px solid #e8eaf0' }}>
-        <div style={{ fontSize: '0.7rem', color: '#888', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '0.5rem' }}>Nomination Details</div>
+        <div style={{ fontSize: '0.7rem', color: '#0050b3', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '0.5rem' }}>Nomination Details</div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.5rem' }}>
           {[
             { label: 'MATERIAL',         value: material },
             { label: 'TRANSPORT SYSTEM', value: transport },
-            { label: 'LOCATION',         value: location || destination || origin },
-            { label: 'SCHEDULED DATE',   value: scheduledDate },
-            { label: 'QUANTITY',         value: quantity },
-            { label: 'ROUTE',            value: route || (origin && destination ? `${origin} → ${destination}` : '') },
-            { label: 'VESSEL',           value: vesselClean },
-            { label: 'CARRIER',          value: carrier },
-            { label: 'SHIPPER',          value: shipper },
+            { label: 'SCHEDULED DATE',   value: schedDate },
+            { label: 'QUANTITY',         value: qty },
+            { label: 'ORIGIN',           value: origin },
+            { label: 'DESTINATION',      value: dest },
+            { label: 'VESSEL',           value: vesselOk },
           ].filter(d => d.value).map((d, i) => (
             <div key={i}>
-              <div style={{ fontSize: '0.63rem', color: '#aaa', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{d.label}</div>
-              <div style={{ fontSize: '0.82rem', fontWeight: 600, color: '#1d2d3e' }}>{d.value}</div>
+              <SectionLabel>{d.label}</SectionLabel>
+              <SectionValue>{d.value}</SectionValue>
             </div>
           ))}
         </div>
@@ -213,18 +272,9 @@ function ETAProposalCard({ text, onApprove, onReject, onClose }) {
 
       {/* Action Buttons */}
       <div style={{ padding: '0.75rem 1.25rem', display: 'flex', gap: '0.75rem', justifyContent: 'flex-end', background: '#f8f9fb' }}>
-        <button onClick={onClose}
-          style={{ padding: '0.45rem 1.1rem', borderRadius: '6px', border: '1px solid #ccc', background: '#fff', color: '#555', fontWeight: 600, cursor: 'pointer', fontSize: '0.85rem' }}>
-          ✕ Close
-        </button>
-        <button onClick={onReject}
-          style={{ padding: '0.45rem 1.1rem', borderRadius: '6px', border: '1px solid #d32f2f', background: '#fdecea', color: '#d32f2f', fontWeight: 600, cursor: 'pointer', fontSize: '0.85rem' }}>
-          ✗ Reject
-        </button>
-        <button onClick={onApprove}
-          style={{ padding: '0.45rem 1.1rem', borderRadius: '6px', border: 'none', background: '#1a7a1a', color: '#fff', fontWeight: 600, cursor: 'pointer', fontSize: '0.85rem' }}>
-          ✓ Approve
-        </button>
+        <button onClick={onClose}  style={{ padding: '0.45rem 1.1rem', borderRadius: '6px', border: '1px solid #ccc', background: '#fff', color: '#555', fontWeight: 600, cursor: 'pointer', fontSize: '0.85rem' }}>✕ Close</button>
+        <button onClick={onReject} style={{ padding: '0.45rem 1.1rem', borderRadius: '6px', border: '1px solid #d32f2f', background: '#fdecea', color: '#d32f2f', fontWeight: 600, cursor: 'pointer', fontSize: '0.85rem' }}>✗ Reject</button>
+        <button onClick={onApprove} style={{ padding: '0.45rem 1.1rem', borderRadius: '6px', border: 'none', background: '#1a7a1a', color: '#fff', fontWeight: 600, cursor: 'pointer', fontSize: '0.85rem' }}>✓ Approve</button>
       </div>
     </div>
   );
