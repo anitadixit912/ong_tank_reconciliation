@@ -209,11 +209,17 @@ function ETAProposalCard({ text, onApprove, onReject, onClose }) {
     ? aisMatch[1].trim().replace(/[*_`]/g,'').slice(0, 80)
     : 'AIS data unavailable (MST_API_KEY not configured)';
 
-  // Geopolitical risk — from table or section
+  // Geopolitical risk — from table: | 🌍 Geopolitical | <adjustment> | <why> |
   const geoWhy  = getTableCell('🌍', 2) || getTableCell('Geopolitical', 2);
   const geoBuff = getTableCell('🌍', 1) || getTableCell('Geopolitical', 1);
-  const risk    = geoWhy
-    ? `${geoBuff ? geoBuff + ' — ' : ''}${geoWhy.slice(0, 100)}${geoWhy.length > 100 ? '…' : ''}`
+  // Only prepend geoBuff if it's not already in geoWhy
+  const riskText = geoWhy
+    ? (geoBuff && !geoWhy.toLowerCase().includes(geoBuff.toLowerCase())
+        ? `${geoBuff} — ${geoWhy}`
+        : geoWhy)
+    : '';
+  const risk = riskText
+    ? riskText.slice(0, 120) + (riskText.length > 120 ? '…' : '')
     : 'No geopolitical risk data';
 
   // Agent reasoning — confidence note line after ### 📊 Confidence: **Medium**\n> note
@@ -909,10 +915,11 @@ export default function NominationEta() {
         }}>
           {messages.map((msg, i) => {
             // Detect ETA proposal from agent
+            // Only show ETA card for actual ETA Intelligence Reports — not for "share details" or other responses
             const isEtaProposal = msg.role === 'assistant' && !msg.dismissed && (
-              /Recommended ETA[:\s]+[0-9]{4}-[0-9]{2}-[0-9]{2}/i.test(msg.text) ||
-              /✅ Recommended ETA/i.test(msg.text) ||
-              (/ETA Intelligence Report/i.test(msg.text) && /Confidence/i.test(msg.text))
+              /##[^\n]*ETA Intelligence Report[^\n]*#\d+/i.test(msg.text) ||
+              (/###[^\n]*Recommended ETA[^\n]*`[0-9]{4}-[0-9]{2}-[0-9]{2}/i.test(msg.text) &&
+               /###[^\n]*Confidence[^\n]*(High|Medium|Low)/i.test(msg.text))
             );
 
             if (isEtaProposal) {
