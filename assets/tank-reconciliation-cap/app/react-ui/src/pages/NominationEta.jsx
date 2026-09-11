@@ -26,9 +26,9 @@ const EMPTY_FORM = {
 
 const SUGGESTIONS = [
   'List all open nominations',
-  'What vessels are currently heading to USMOB?',
-  'Propose an ETA for nomination 00000000000000000128',
-  'Show historical nominations for BLK_GASOLINE 87 at USMOB via BARGE_1743',
+  'Propose an ETA for the latest open nomination',
+  'Which nominations are overdue?',
+  'Show historical patterns for open nominations',
 ];
 
 const INITIAL_MESSAGE = {
@@ -125,73 +125,104 @@ function ETAProposalCard({ text, onApprove, onReject, onClose }) {
     return '';
   };
 
-  const extractSection = (label) => {
-    const re = new RegExp(label + '[:\\s]*([^\\n]+(?:\\n(?![#\\-*A-Z])[^\\n]+)*)', 'i');
-    const m = text.match(re);
-    return m ? m[1].trim().replace(/[*_`#]/g, '').trim() : '';
-  };
+  // Agent output format (from system prompt):
+  // ## 🚢 ETA Intelligence Report — Nomination #<N>
+  // **Material:** <x> | **Transport:** <x> | **Scheduled:** <date>
+  // **🗺 Route:** <origin> → <destination>
+  // ### ✅ Recommended ETA: `<date>`
+  // ### 📊 Confidence: **<High/Medium/Low>**
+  // > <confidence_note>
+  // | 🚢 Carrier | ... | ... |
+  // | 📦 Seasonal | ... | ... |
+  // | 🌍 Geopolitical | ... | ... |
 
-  const nomNum    = extract([/Nomination\s+#?(\d+)/i, /nomination number[:\s]+#?(\S+)/i]);
-  // Extract ETA — with optional time component
+  const nomNum    = extract([/ETA Intelligence Report[^#\n]*#(\d+)/i, /Nomination\s+#?(\d+)/i]);
+
+  // ETA — agent wraps it in backticks: `2026-09-18`
   const etaRaw    = extract([
-    /Recommended ETA[:\s]+([0-9]{4}-[0-9]{2}-[0-9]{2}[T\s][0-9:]+)/i,
-    /Final ETA[:\s]+([0-9]{4}-[0-9]{2}-[0-9]{2}[T\s][0-9:]+)/i,
-    /ETA[:\s]+([0-9]{4}-[0-9]{2}-[0-9]{2}[T\s][0-9:]+)/i,
+    /Recommended ETA[:\s]*`([0-9]{4}-[0-9]{2}-[0-9]{2}[^`]*)`/i,
+    /Recommended ETA[:\s]+([0-9]{4}-[0-9]{2}-[0-9]{2}[T ][0-9:]+)/i,
     /Recommended ETA[:\s]+([0-9]{4}-[0-9]{2}-[0-9]{2})/i,
-    /Final ETA[:\s]+([0-9]{4}-[0-9]{2}-[0-9]{2})/i,
-    /ETA[:\s]+([0-9]{4}-[0-9]{2}-[0-9]{2})/i,
+    /Base ETA[:\s]*`([0-9]{4}-[0-9]{2}-[0-9]{2}[^`]*)`/i,
   ]);
   const etaDate   = etaRaw ? (() => {
     try {
-      const d = new Date(etaRaw.replace(' ', 'T'));
-      const hasTime = /[T\s][0-9]{2}:[0-9]{2}/.test(etaRaw);
+      const clean = etaRaw.trim();
+      const d = new Date(clean.replace(' ', 'T'));
+      const hasTime = /[T ][0-9]{2}:[0-9]{2}/.test(clean);
       return hasTime
         ? d.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' }) + ', ' + d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
         : d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
     } catch(_) { return etaRaw; }
   })() : '—';
-  const confidence = extract([/Confidence[:\s]+(High|Medium|Low)/i, /confidence[^\n]*(High|Medium|Low)/i]);
 
-  // Nomination details — only short clean values
-  const material  = extract([/Material[:\s]+([A-Z0-9_\-\s]{2,40}?)(?:\n|$|\|)/i]);
-  const transport = extract([/Transport(?:\s+System)?[:\s]+([A-Z0-9_\-\s]{2,40}?)(?:\n|$|\|)/i]);
-  const origin    = extract([/Origin[:\s]+([A-Z0-9_\-\s]{2,30}?)(?:\n|$|\|→)/i]);
-  const dest      = extract([/Destination[:\s]+([A-Z0-9_\-\s]{2,30}?)(?:\n|$|\|→)/i]);
-  const vessel    = extract([/Vessel(?:\s+Name)?[:\s]+([A-Z][A-Z0-9\s\-]{2,25}?)(?:\n|$|\|)/i]);
-  const vesselOk  = vessel && !vessel.toLowerCase().includes('track') && vessel.toUpperCase() !== 'TBN' ? vessel : null;
-  const schedDate = extract([/Scheduled\s*Date[:\s]+([0-9]{4}-[0-9]{2}-[0-9]{2})/i]);
-  const qty       = extract([/Quantit(?:y|ies)[:\s]+([\d,.]+ *(?:BBL|MT|TO|KG|LT))/i]);
+  const confidence = extract([/Confidence[:\s*]*\**(High|Medium|Low)\**/i, /Confidence[:\s]+(High|Medium|Low)/i]);
 
-  // Supporting evidence — extract just first sentence (before period or newline)
-  const getFirstSentence = (val) => {
-    if (!val) return '';
-    const s = val.split(/[.\n]/)[0].trim();
-    return s.length > 80 ? s.slice(0, 80) + '…' : s;
+  // Nom details from header line: **Material:** x | **Transport:** x | **Scheduled:** x
+  // Use extractClean to strip only surrounding markdown, not internal characters
+  const extractClean = (patterns) => {
+    for (const p of patterns) {
+      const m = text.match(p);
+      if (m) return (m[1]?.trim() || '').replace(/^\*+|\*+$/g, '').replace(/^`+|`+$/g, '').trim();
+    }
+    return '';
+  };
+  const material  = extractClean([/\*\*Material:\*\*\s*([^|*\n]+)/i, /Material[:\s]+([^\n|*\n]+)/i]);
+  const transport = extractClean([/\*\*Transport:\*\*\s*([^|*\n]+)/i, /Transport(?:\s+System)?[:\s]+([^\n|*\n]+)/i]);
+  const schedDate = extract([/\*\*Scheduled:\*\*\s*([0-9]{4}-[0-9]{2}-[0-9]{2})/i, /Scheduled[:\s]+([0-9]{4}-[0-9]{2}-[0-9]{2})/i]);
+
+  // Route: **🗺 Route:** origin → destination
+  const routeLine = extract([/Route[:\s]+([^\n]+)/i]).replace(/[*_`🗺]/g,'').trim();
+  const routeParts = routeLine.split(/→|->/).map(s => s.trim());
+  const origin    = routeParts[0] || '';
+  const dest      = routeParts[1] || '';
+
+  // Vessel — not in standard format but may appear in base ETA explanation
+  const vesselRaw = extract([/vessel[:\s]+([A-Z][A-Z0-9\s\-]{2,30}?)(?:\n|$|\||\))/i]);
+  const vesselOk  = vesselRaw && !vesselRaw.toLowerCase().includes('track') && vesselRaw.toUpperCase() !== 'TBN' ? vesselRaw.replace(/[*_`]/g,'').trim() : null;
+
+  const qty       = extract([/Quantit(?:y|ies)[:\s]+([\d,.]+ *(?:BBL|MT|TO|KG|LT))/i, /([\d,.]+ *(?:BBL|MT|TO|KG|LT))/i]);
+
+  // Supporting evidence — from adjustments table rows
+  // | 📦 Seasonal | +Xd or No adjustment | <why> |
+  // | 🌍 Geopolitical | ... | <why> |
+  const getTableCell = (emoji, col) => {
+    const re = new RegExp(`\\|[^|]*${emoji}[^|]*\\|([^|]*)\\|([^|]*)\\|`, 'i');
+    const m = text.match(re);
+    if (!m) return '';
+    return col === 2 ? m[2].trim().replace(/[*_`]/g,'') : m[1].trim().replace(/[*_`]/g,'');
   };
 
-  const historicalRaw = extractSection('Historical');
-  const historical    = historicalRaw
-    ? (historicalRaw.toLowerCase().includes('no ') || historicalRaw.toLowerCase().includes('insufficient') || historicalRaw.toLowerCase().includes('not available')
-        ? 'No historical data available'
-        : getFirstSentence(historicalRaw))
-    : 'No historical data';
+  // Historical: look for historical nominations tool result mention
+  const histMatch = text.match(/historical[^:.\n]*:[^\n]*(\d+)\s+(?:records?|nominations?|shipments?)/i)
+    || text.match(/(\d+)\s+historical/i);
+  const historical = histMatch
+    ? `${histMatch[1]} historical shipment(s) found`
+    : text.toLowerCase().includes('no historical') || text.toLowerCase().includes('insufficient')
+      ? 'No historical data available'
+      : 'No historical data available';
 
-  const aisRaw = extractSection('(?:AIS|Live Vessel|Vessel Position|Vessel Tracking)');
-  const ais    = aisRaw
-    ? (aisRaw.toLowerCase().includes('not configured') || aisRaw.toLowerCase().includes('unavailable') || aisRaw.toLowerCase().includes('no api')
-        ? 'AIS data unavailable'
-        : getFirstSentence(aisRaw))
-    : 'AIS data unavailable';
+  // AIS: look for MST or AIS mention
+  const aisMatch = text.match(/AIS[^.\n]*position[^.\n]*:\s*([^\n.]+)/i)
+    || text.match(/vessel[^.\n]*position[^.\n]*:\s*([^\n.]+)/i);
+  const ais = aisMatch
+    ? aisMatch[1].trim().replace(/[*_`]/g,'').slice(0, 80)
+    : 'AIS data unavailable (MST_API_KEY not configured)';
 
-  const riskRaw = extractSection('(?:Geopolitical|Risk|Route Risk)');
-  const risk    = riskRaw
-    ? getFirstSentence(riskRaw)
-    : 'Risk data unavailable';
+  // Geopolitical risk — from table or section
+  const geoWhy  = getTableCell('🌍', 2) || getTableCell('Geopolitical', 2);
+  const geoBuff = getTableCell('🌍', 1) || getTableCell('Geopolitical', 1);
+  const risk    = geoWhy
+    ? `${geoBuff ? geoBuff + ' — ' : ''}${geoWhy.slice(0, 100)}${geoWhy.length > 100 ? '…' : ''}`
+    : 'No geopolitical risk data';
 
-  // Agent reasoning — full text
-  const reasoningMatch2 = text.match(/(?:ETA\s+)?(?:reasoning|basis|recommendation)[:\s]*([^\n]{15,}(?:\n(?![#\-*A-Z•])[^\n]+)*)/i);
-  const reasoningRaw = reasoningMatch2 ? reasoningMatch2[1].trim().replace(/[*_`#]/g, '') : '';
-  const reasoning    = reasoningRaw || 'No reasoning available.';
+  // Agent reasoning — confidence note line after ### 📊 Confidence: **Medium**\n> note
+  const confNoteMatch = text.match(/###[^\n]*Confidence[^\n]*\n>\s*([^\n]+)/i);
+  const baseEtaNote   = text.match(/Base ETA[^\n]*\n>\s*([^\n]+)/i);
+  const reasoningRaw  = confNoteMatch ? confNoteMatch[1].trim().replace(/[*_`]/g,'')
+                      : baseEtaNote   ? baseEtaNote[1].trim().replace(/[*_`]/g,'')
+                      : '';
+  const reasoning     = reasoningRaw || 'No reasoning available.';
 
   const confidenceColor = confidence === 'High' ? '#1a7a1a' : confidence === 'Medium' ? '#b36b00' : '#c62828';
   const confidenceBg    = confidence === 'High' ? '#e8f5e9' : confidence === 'Medium' ? '#fff8e1' : '#fdecea';
@@ -467,7 +498,7 @@ export default function NominationEta() {
   const [items, setItems]           = useState([{ Itemtype: '', Locationid: '', Demandmaterial: '', Nominatedqty: '', Quantityunit: '', Scheduleddate: '', Documentindicator: 'X', Movementscenario: '' }]);
   const [creating, setCreating]     = useState(false);
   const [createMsg, setCreateMsg]   = useState(null);
-  const [valueHelps, setValueHelps] = useState({ locations: [], materials: [], transportSystems: [], quantityUnits: [], nominationTypes: [], itemTypes: [], modesOfTransport: [] });
+  const [valueHelps, setValueHelps] = useState({ locations: [], materials: [], transportSystems: [], quantityUnits: [], nominationTypes: [], itemTypes: [], modesOfTransport: [], documentIndicators: [] });
   const [nominations, setNominations]         = useState([]);
   const [nomsLoading, setNomsLoading]         = useState(false);
   const [showNominationsList, setShowNominationsList] = useState(false);
@@ -781,10 +812,20 @@ export default function NominationEta() {
                   <div>
                     <Label>Document Indicator *</Label>
                     <Select style={{ width: '100%' }} onChange={e => setItemField(idx, 'Documentindicator', e.detail.selectedOption.value)}>
-                      <Option value="X" selected={item.Documentindicator === 'X'}>X — No Reference Document</Option>
-                      <Option value="P" selected={item.Documentindicator === 'P'}>P — Purchase Order</Option>
-                      <Option value="S" selected={item.Documentindicator === 'S'}>S — Sales Order</Option>
-                      <Option value="G" selected={item.Documentindicator === 'G'}>G — Sales Contract</Option>
+                      <Option value="">-- Select --</Option>
+                      {(valueHelps.documentIndicators && valueHelps.documentIndicators.length > 0
+                        ? valueHelps.documentIndicators
+                        : [
+                            { Documentindicator: 'X', Description: 'No Reference Document' },
+                            { Documentindicator: 'P', Description: 'Purchase Order' },
+                            { Documentindicator: 'S', Description: 'Sales Order' },
+                            { Documentindicator: 'G', Description: 'Sales Contract' },
+                          ]
+                      ).map(d => (
+                        <Option key={d.Documentindicator} value={d.Documentindicator} selected={item.Documentindicator === d.Documentindicator}>
+                          {d.Documentindicator}{d.Description && d.Description !== d.Documentindicator ? ` — ${d.Description}` : ''}
+                        </Option>
+                      ))}
                     </Select>
                   </div>
                   <div>

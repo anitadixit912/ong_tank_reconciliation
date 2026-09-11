@@ -970,6 +970,18 @@ module.exports = class ReconciliationService extends cds.ApplicationService {
         return [];
       };
 
+      // Try multiple possible entity names for Document Indicator VH
+      const docIndEntities = ['SIDOCINDSet', 'I_NominationDocIndVH', 'NMDOCINDSet', 'SIPSXSet'];
+      let documentIndicators = [];
+      for (const entity of docIndEntities) {
+        const r = await _vhFetch(entity, r => {
+          const code = r.Docind || r.DocumentIndicator || r.Psx || r.Code || r.Key;
+          const desc = r.Description || r.Ltx || r.Kbez || r.Text || code;
+          return code ? { Documentindicator: code, Description: desc } : null;
+        });
+        if (r.length > 0) { documentIndicators = r; cds.log('s4').info('DocumentIndicator VH found: ' + entity + ' count=' + r.length); break; }
+      }
+
       const [locations, materials, transportSystems, quantityUnits, nominationTypes, itemTypes, modesOfTransport] = await Promise.all([
         _vhFetch('I_LocationIdVH',                r => r.LocationId         ? { Locationid: r.LocationId, Description: r.LocationName || r.LocationId } : null),
         _vhFetch('I_ScheduledMaterialVH',         r => r.ScheduledMaterial  ? { Demandmaterial: r.ScheduledMaterial, Description: r.MaterialDesc || r.ScheduledMaterial } : null),
@@ -978,12 +990,11 @@ module.exports = class ReconciliationService extends cds.ApplicationService {
         _vhFetch('I_NominationTypeVH',            r => r.NominationType     ? { Nominationtype: r.NominationType, Description: r.NominationTypeDescription || r.NominationType } : null),
         _vhFetch('SITYPSet',                      r => r.Sityp ? { Itemtype: r.Sityp, Description: r.Description || r.Ltx || r.Kbez || r.Sityp } : null),
         _vhFetch('I_NominationModeOfTranspVH',    r => r.ModeOfTransport    ? { ModeOfTransport: r.ModeOfTransport, Description: r.ModeOfTransportDesc || r.ModeOfTransport } : null),
-
       ]);
 
-      cds.log('s4').info('ValueHelps: loc=' + locations.length + ' mat=' + materials.length + ' ts=' + transportSystems.length + ' uom=' + quantityUnits.length + ' nt=' + nominationTypes.length + ' it=' + itemTypes.length + ' mot=' + modesOfTransport.length);
+      cds.log('s4').info('ValueHelps: loc=' + locations.length + ' mat=' + materials.length + ' ts=' + transportSystems.length + ' uom=' + quantityUnits.length + ' nt=' + nominationTypes.length + ' it=' + itemTypes.length + ' mot=' + modesOfTransport.length + ' docind=' + documentIndicators.length);
 
-      return { locations, materials, transportSystems, quantityUnits, nominationTypes, itemTypes, modesOfTransport };
+      return { locations, materials, transportSystems, quantityUnits, nominationTypes, itemTypes, modesOfTransport, documentIndicators };
     });
 
     // ── getCarrierShipperByTS ────────────────────────────────────────────────
