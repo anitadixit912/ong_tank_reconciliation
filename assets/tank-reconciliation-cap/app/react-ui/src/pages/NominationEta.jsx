@@ -137,15 +137,22 @@ function ETAProposalCard({ text, onApprove, onReject, onClose }) {
     /Confidence[:\s]+(High|Medium|Low)/i,
     /confidence[^\n]*(High|Medium|Low)/i,
   ]);
-  const material    = extract([/Material[:\s]+([^\n|✅📊🗺📡💡⚠]+)/i]);
-  const transport   = extract([/Transport(?:\s+System)?[:\s]+([^\n|✅📊🗺📡💡⚠]+)/i]);
-  const origin      = extract([/Origin[:\s]+([^\n|✅📊🗺📡💡⚠]+)/i]);
-  const destination = extract([/Destination[:\s]+([^\n|✅📊🗺📡💡⚠]+)/i]);
-  const vessel      = extract([/Vessel(?:\s+Name)?[:\s]+([A-Z][^\n|]{2,30})/i]);
-  const route       = extract([/Route[:\s]+([^\n✅📊🗺📡💡⚠]+)/i, /🗺\s*Route[:\s]+([^\n]+)/i]);
+  const clean = (v) => (v || '').replace(/[*_`#]/g, '').trim();
+  const material      = clean(extract([/Material[:\s]+([^\n|•\-\*]+)/i]));
+  const transport     = clean(extract([/Transport(?:\s+System)?[:\s]+([^\n|•\-\*]+)/i]));
+  const origin        = clean(extract([/Origin[:\s]+([^\n|•→\-\*]+)/i]));
+  const destination   = clean(extract([/Destination[:\s]+([^\n|•→\-\*]+)/i]));
+  const location      = clean(extract([/Location(?:\s+ID)?[:\s]+([^\n|•\-\*]+)/i]));
+  const scheduledDate = clean(extract([/Scheduled\s*Date[:\s]+([0-9]{4}-[0-9]{2}-[0-9]{2})/i, /Schedule[dD][:\s]+([0-9]{4}-[0-9]{2}-[0-9]{2})/i]));
+  const quantity      = clean(extract([/Quantit(?:y|ies)[:\s]+([\d,.]+ *(?:BBL|MT|TO|KG|LT|bbl|mt))/i, /Nominated[:\s]+([\d,.]+ *(?:BBL|MT|TO|KG|LT))/i]));
+  const carrier       = clean(extract([/Carrier[:\s]+([^\n|•\-\*,]+)/i]));
+  const shipper       = clean(extract([/Shipper[:\s]+([^\n|•\-\*,]+)/i]));
+  const rawVessel     = clean(extract([/Vessel(?:\s+Name)?[:\s]+([^\n|•\-\*]{3,30})/i]));
+  const vesselClean   = rawVessel && !rawVessel.toLowerCase().includes('track') && !rawVessel.toLowerCase().includes('no ') && !rawVessel.toLowerCase().includes('tbn') ? rawVessel : null;
+  const route         = clean(extract([/Route[:\s]+([^\n|•\-\*]+)/i]));
 
-  // Extract reasoning — text after "AGENT REASONING" or "Note:" section
-  const reasoningMatch = text.match(/(?:reasoning|note)[:\s]*([^\n]+(?:\n(?![A-Z#*])[^\n]+)*)/i);
+  // Extract reasoning
+  const reasoningMatch = text.match(/(?:reasoning|basis|note)[:\s]*([^\n]{20,}(?:\n(?![A-Z#*•])[^\n]+)*)/i);
   const reasoning = reasoningMatch ? reasoningMatch[1].trim() : '';
 
   const confidenceColor = confidence === 'High' ? '#1a7a1a' : confidence === 'Medium' ? '#b36b00' : '#c62828';
@@ -188,10 +195,13 @@ function ETAProposalCard({ text, onApprove, onReject, onClose }) {
           {[
             { label: 'MATERIAL',         value: material },
             { label: 'TRANSPORT SYSTEM', value: transport },
+            { label: 'LOCATION',         value: location || destination || origin },
+            { label: 'SCHEDULED DATE',   value: scheduledDate },
+            { label: 'QUANTITY',         value: quantity },
             { label: 'ROUTE',            value: route || (origin && destination ? `${origin} → ${destination}` : '') },
-            { label: 'ORIGIN',           value: origin },
-            { label: 'DESTINATION',      value: destination },
-            { label: 'VESSEL',           value: vessel },
+            { label: 'VESSEL',           value: vesselClean },
+            { label: 'CARRIER',          value: carrier },
+            { label: 'SHIPPER',          value: shipper },
           ].filter(d => d.value).map((d, i) => (
             <div key={i}>
               <div style={{ fontSize: '0.63rem', color: '#aaa', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{d.label}</div>
@@ -876,7 +886,7 @@ export default function NominationEta() {
                   flexShrink: 0,
                 }} />
                 <div style={{ fontSize: '0.875rem', color: '#ffffff', fontWeight: 600 }}>
-                  🤖 Agent is thinking… gathering SAP, vessel tracking, geopolitical & historical data
+                  🤖 Agent is thinking… gathering historical SAP, tracking vessel & geopolitical data
                 </div>
               </div>
             </FlexBox>

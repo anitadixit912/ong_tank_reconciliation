@@ -230,7 +230,7 @@ async function _fetchOpenNominations() {
 
     const [itemsRes, headersRes] = await Promise.all([
       _httpGet(baseUrl + '/sap/opu/odata/sap/TSW_MYNOMINATIONS_SRV_01/C_Oij06_MyNominations?$format=json&$orderby=NominationDoc%20desc&$top=500' + cp, headers, proxyOpts),
-      _httpGet(baseUrl + '/sap/opu/odata/sap/TSW_MYNOMINATIONS_SRV_01/I_NominationHeaderFld?$format=json&$orderby=NominationDoc%20desc&$top=500' + cp, headers, proxyOpts)
+      _httpGet(baseUrl + '/sap/opu/odata/sap/TSW_MYNOMINATIONS_SRV_01/I_NominationHeaderFld?$format=json&$orderby=NominationDoc%20desc&$top=1000' + cp, headers, proxyOpts)
     ]);
 
     const itemRows    = itemsRes.status === 200   ? (JSON.parse(itemsRes.body).d?.results   || []) : [];
@@ -276,6 +276,10 @@ async function _fetchOpenNominations() {
       InTransitPlant:   n.InTransitPlant                   || '',
       VehicleId:        n.VehicleId                        || '',
       Nomnr:            n.NominationNumber || n.ExternalNominationNumber || n.Nomnr || '',
+      // completedAt: derive from last changed date if status is completed (5=Completed)
+      completedAt:      (n.NominationHeaderStatus === '5' || n.NominationHeaderStatus === 'C')
+                          ? parseDate(n.LastChangedDate || n.NominationScheduleDate)
+                          : null,
     }));
   } catch (err) {
     cds.log('s4').warn('Failed to fetch nominations: ' + err.message);
