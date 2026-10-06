@@ -41,13 +41,22 @@ async function action(name, body) {
     body: JSON.stringify(body)
   });
   if (!res.ok) {
+    var rawText = '';
+    try { rawText = await res.text(); } catch (_) {}
     var msg = res.statusText || ('HTTP ' + res.status);
     try {
-      var j = await res.json();
+      var j = JSON.parse(rawText);
       msg = (j.error && j.error.message) ||
             (j.error && j.error.innererror && j.error.innererror.message) ||
-            j.message || JSON.stringify(j);
-    } catch (_) {}
+            j.message || msg;
+    } catch (_) {
+      if (rawText) {
+        var stripped = rawText.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 400);
+        if (stripped.length > 5 && !stripped.toLowerCase().startsWith('<!doctype')) {
+          msg = 'HTTP ' + res.status + ': ' + stripped;
+        }
+      }
+    }
     var err = new Error(msg);
     err.status = res.status;
     throw err;

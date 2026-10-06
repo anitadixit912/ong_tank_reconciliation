@@ -1504,7 +1504,7 @@ Return ONLY valid JSON. No explanation, no markdown, no code blocks.`;
       try {
         raw = await _callAiCore(systemPrompt, text);
       } catch (err) {
-        return req.reject(500, 'AI Core call failed: ' + err.message);
+        return req.reject(422, 'AI Core unavailable: ' + err.message);
       }
 
       // Strip markdown code blocks if present

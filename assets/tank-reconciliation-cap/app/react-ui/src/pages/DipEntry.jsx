@@ -851,15 +851,15 @@ export default function DipEntry() {
               <div style={{ ...S.banner('err'), marginBottom: '1rem' }}>
                 <div style={{ fontWeight: 700, marginBottom: '0.35rem' }}>⚠ AI extraction failed</div>
                 <div style={{ fontSize: '0.8rem', opacity: 0.9, wordBreak: 'break-word' }}>
-                  {aiError.includes('AI Core call failed:')
+                  {aiError.includes('AI Core') || aiError.includes('aicore') || aiError.includes('destination')
                     ? <>
-                        <strong>Cause:</strong> SAP AI Core could not be reached.<br/>
+                        <strong>Cause:</strong> SAP AI Core could not be reached via the <code>aicore</code> BTP destination.<br/>
                         <details style={{ marginTop: '0.3rem' }}>
                           <summary style={{ cursor: 'pointer', color: 'inherit', fontSize: '0.78rem' }}>Technical details</summary>
                           <code style={{ fontSize: '0.75rem', display: 'block', marginTop: '0.25rem', whiteSpace: 'pre-wrap', opacity: 0.8 }}>{aiError}</code>
                         </details>
                         <div style={{ marginTop: '0.4rem', fontSize: '0.78rem', color: 'inherit', opacity: 0.85 }}>
-                          Check that the <code>aicore</code> BTP destination is configured and the AI Core deployment is running.
+                          Check that the <code>aicore</code> BTP destination is configured and the AI Core model deployment is running.
                           You can still enter the dip reading manually in the <strong>Manual Entry</strong> tab.
                         </div>
                       </>
