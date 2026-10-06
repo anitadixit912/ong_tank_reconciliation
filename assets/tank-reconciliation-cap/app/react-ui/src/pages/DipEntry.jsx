@@ -11,14 +11,14 @@ import {
 
 const DIP_UNITS   = ['MM', 'CM', 'L', 'HL', 'BBL', 'M3'];
 const DIP_TYPES   = [{ code: 'I', label: 'Innage (depth from bottom)' }, { code: 'U', label: 'Ullage (empty space from top)' }];
-const INPUT_METHODS = { MANUAL: '✏️ Manual', EXCEL: '📊 Excel', AI_PROMPT: '🤖 AI Prompt' };
+const INPUT_METHODS = { MANUAL: '✏️ Manual', EXCEL: '📊 Excel', AI_PROMPT: '🤖 AI' };
 
-const STATUS_BADGE = {
-  DRAFT:        { label: 'Draft',        cls: 'badge-pending' },
-  SUBMITTED:    { label: 'Submitted',    cls: 'badge-flag' },
-  POSTED:       { label: 'Posted',       cls: 'badge-ok' },
-  FAILED:       { label: 'Failed',       cls: 'badge-urgent' },
-  PENDING_ABAP: { label: 'Pending ABAP', cls: 'badge-flag' },
+const STATUS_CFG = {
+  DRAFT:        { label: 'Draft',        color: '#6c757d', bg: '#f8f9fa'  },
+  SUBMITTED:    { label: 'Submitted',    color: '#0d6efd', bg: '#e7f1ff'  },
+  POSTED:       { label: '✓ Posted',     color: '#198754', bg: '#d1e7dd'  },
+  FAILED:       { label: '✗ Failed',     color: '#dc3545', bg: '#f8d7da'  },
+  PENDING_ABAP: { label: 'Pending ABAP', color: '#fd7e14', bg: '#fff3cd'  },
 };
 
 const EXCEL_COL_ALIASES = {
@@ -51,14 +51,29 @@ function mapExcelRow(headers, row) {
   return out;
 }
 
-function validateRow(row) {
+function validateExcelRow(row) {
   const errors = [];
-  if (!row.tankId)          errors.push('tankId required');
-  if (!row.measurementDate) errors.push('measurementDate required');
-  if (!row.dipType || !['I','U'].includes(row.dipType.toUpperCase())) errors.push('dipType must be I or U');
-  if (!row.dipValue || isNaN(parseFloat(row.dipValue))) errors.push('dipValue must be numeric');
-  if (!row.dipUnit || !DIP_UNITS.includes(row.dipUnit.toUpperCase())) errors.push('dipUnit must be one of ' + DIP_UNITS.join(', '));
+  if (!row.tankId)          errors.push('Tank ID required');
+  if (!row.measurementDate) errors.push('Date required');
+  if (!row.dipType || !['I','U'].includes(row.dipType.toUpperCase())) errors.push('Dip type must be I or U');
+  if (!row.dipValue || isNaN(parseFloat(row.dipValue))) errors.push('Dip value must be a number');
+  if (!row.dipUnit || !DIP_UNITS.includes(row.dipUnit.toUpperCase())) errors.push('Unit must be: ' + DIP_UNITS.join(', '));
   return errors;
+}
+
+function validateManualForm(form) {
+  const errs = {};
+  if (!form.tankId)          errs.tankId = 'Please select a tank';
+  if (!form.measurementDate) errs.measurementDate = 'Date is required';
+  if (!form.dipValue)        errs.dipValue = 'Dip value is required';
+  else if (isNaN(parseFloat(form.dipValue))) errs.dipValue = 'Dip value must be a number (e.g. 1842.5)';
+  if (form.waterHeight !== '' && form.waterHeight != null && isNaN(parseFloat(form.waterHeight)))
+    errs.waterHeight = 'Water height must be a number';
+  if (form.temperature !== '' && form.temperature != null && isNaN(parseFloat(form.temperature)))
+    errs.temperature = 'Temperature must be a number (e.g. 38.5)';
+  if (form.density !== '' && form.density != null && isNaN(parseFloat(form.density)))
+    errs.density = 'Density must be a number (e.g. 850.0)';
+  return errs;
 }
 
 function emptyForm() {
@@ -73,27 +88,125 @@ function emptyForm() {
   };
 }
 
-export default function DipEntry() {
-  const [tab, setTab]               = useState('manual');
-  const [tanks, setTanks]           = useState([]);
-  const [history, setHistory]       = useState([]);
-  const [histLoading, setHistLoading] = useState(false);
-  const [form, setForm]             = useState(emptyForm());
-  const [saving, setSaving]         = useState(false);
-  const [saveMsg, setSaveMsg]       = useState(null);
+/* ── Shared styles ──────────────────────────────────────────────────────────── */
+const S = {
+  section: {
+    background: '#fff', border: '1px solid #e0e4ea', borderRadius: '10px',
+    marginBottom: '1.25rem', overflow: 'hidden',
+  },
+  sectionHead: {
+    background: '#f6f8fc', borderBottom: '1px solid #e0e4ea',
+    padding: '0.75rem 1.25rem', fontWeight: 600, fontSize: '0.9rem',
+    color: '#2c3e50', display: 'flex', alignItems: 'center', gap: '0.5rem'
+  },
+  sectionBody: { padding: '1.25rem' },
+  row2: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1rem' },
+  row3: { display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '1rem', marginBottom: '1rem' },
+  label: { display: 'block', fontSize: '0.8rem', fontWeight: 600, color: '#495057', marginBottom: '0.3rem' },
+  req:   { color: '#dc3545', marginLeft: '2px' },
+  input: {
+    width: '100%', padding: '0.45rem 0.7rem', border: '1px solid #ced4da',
+    borderRadius: '6px', fontSize: '0.875rem', boxSizing: 'border-box',
+    outline: 'none', transition: 'border-color 0.15s',
+  },
+  inputErr: { borderColor: '#dc3545', background: '#fff8f8' },
+  errMsg: { color: '#dc3545', fontSize: '0.75rem', marginTop: '0.25rem' },
+  hint:   { color: '#6c757d', fontSize: '0.75rem', marginTop: '0.25rem' },
+  btnRow: { display: 'flex', gap: '0.6rem', marginTop: '1.25rem', flexWrap: 'wrap' },
+  btnPrimary: {
+    padding: '0.5rem 1.1rem', background: '#0d6efd', color: '#fff',
+    border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 600, fontSize: '0.875rem',
+  },
+  btnSecondary: {
+    padding: '0.5rem 1.1rem', background: '#fff', color: '#495057',
+    border: '1px solid #ced4da', borderRadius: '6px', cursor: 'pointer', fontSize: '0.875rem',
+  },
+  btnSuccess: {
+    padding: '0.5rem 1.1rem', background: '#198754', color: '#fff',
+    border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 600, fontSize: '0.875rem',
+  },
+  badge: (cfg) => ({
+    display: 'inline-block', padding: '0.2rem 0.55rem', borderRadius: '4px',
+    fontSize: '0.75rem', fontWeight: 600, color: cfg.color, background: cfg.bg, letterSpacing: '0.02em'
+  }),
+  tab: (active) => ({
+    padding: '0.65rem 1.2rem', border: 'none', background: 'none', cursor: 'pointer',
+    borderBottom: active ? '3px solid #0d6efd' : '3px solid transparent',
+    fontWeight: active ? 700 : 400, color: active ? '#0d6efd' : '#495057',
+    fontSize: '0.875rem', marginBottom: '-2px', transition: 'color 0.15s',
+  }),
+  banner: (type) => {
+    const map = {
+      ok:   { bg: '#d1e7dd', color: '#0a3622', border: '#badbcc' },
+      warn: { bg: '#fff3cd', color: '#664d03', border: '#ffecb5' },
+      err:  { bg: '#f8d7da', color: '#58151c', border: '#f5c2c7' },
+      info: { bg: '#cfe2ff', color: '#084298', border: '#b6d4fe' },
+    };
+    const c = map[type] || map.info;
+    return {
+      padding: '0.75rem 1rem', borderRadius: '8px', marginBottom: '1rem',
+      background: c.bg, color: c.color, border: '1px solid ' + c.border,
+      fontSize: '0.875rem', lineHeight: 1.5,
+    };
+  },
+};
 
-  // Excel tab state
-  const [excelRows, setExcelRows]   = useState([]);
-  const [excelErrors, setExcelErrors] = useState([]);
-  const [dragOver, setDragOver]     = useState(false);
+function FieldError({ msg }) {
+  if (!msg) return null;
+  return <div style={S.errMsg}>⚠ {msg}</div>;
+}
+
+function FormInput({ label, required, hint, error, type = 'text', value, onChange, ...rest }) {
+  return (
+    <div>
+      <label style={S.label}>{label}{required && <span style={S.req}>*</span>}</label>
+      <input
+        type={type}
+        style={{ ...S.input, ...(error ? S.inputErr : {}) }}
+        value={value}
+        onChange={onChange}
+        {...rest}
+      />
+      {error ? <FieldError msg={error} /> : hint ? <div style={S.hint}>{hint}</div> : null}
+    </div>
+  );
+}
+
+function FormSelect({ label, required, hint, error, children, value, onChange }) {
+  return (
+    <div>
+      <label style={S.label}>{label}{required && <span style={S.req}>*</span>}</label>
+      <select style={{ ...S.input, ...(error ? S.inputErr : {}) }} value={value} onChange={onChange}>
+        {children}
+      </select>
+      {error ? <FieldError msg={error} /> : hint ? <div style={S.hint}>{hint}</div> : null}
+    </div>
+  );
+}
+
+export default function DipEntry() {
+  const [tab, setTab]                   = useState('manual');
+  const [tanks, setTanks]               = useState([]);
+  const [history, setHistory]           = useState([]);
+  const [histLoading, setHistLoading]   = useState(false);
+  const [form, setForm]                 = useState(emptyForm());
+  const [fieldErrors, setFieldErrors]   = useState({});
+  const [saving, setSaving]             = useState(false);
+  const [saveMsg, setSaveMsg]           = useState(null);
+  const [postStep, setPostStep]         = useState(null); // null | 'saving' | 'posting' | 'done'
+
+  // Excel tab
+  const [excelRows, setExcelRows]       = useState([]);
+  const [excelErrors, setExcelErrors]   = useState([]);
+  const [dragOver, setDragOver]         = useState(false);
   const [batchPosting, setBatchPosting] = useState(false);
   const [batchResult, setBatchResult]   = useState(null);
   const fileInputRef = useRef(null);
 
-  // AI Prompt tab state
-  const [aiText, setAiText]         = useState('');
+  // AI tab
+  const [aiText, setAiText]             = useState('');
   const [aiExtracting, setAiExtracting] = useState(false);
-  const [aiError, setAiError]       = useState(null);
+  const [aiError, setAiError]           = useState(null);
   const [aiConfidence, setAiConfidence] = useState(null);
 
   const loadHistory = useCallback(async () => {
@@ -112,64 +225,72 @@ export default function DipEntry() {
     const id = e.target.value;
     const t  = tanks.find(x => x.tankId === id);
     setForm(f => ({ ...f, tankId: id, tankName: t ? t.tankName : '' }));
+    if (fieldErrors.tankId) setFieldErrors(fe => ({ ...fe, tankId: undefined }));
   }
 
   function setField(name) {
-    return e => setForm(f => ({ ...f, [name]: e.target.value }));
+    return e => {
+      setForm(f => ({ ...f, [name]: e.target.value }));
+      if (fieldErrors[name]) setFieldErrors(fe => ({ ...fe, [name]: undefined }));
+    };
+  }
+
+  function doValidate() {
+    const errs = validateManualForm(form);
+    setFieldErrors(errs);
+    return Object.keys(errs).length === 0;
   }
 
   async function handleSaveDraft() {
-    setSaving(true); setSaveMsg(null);
+    if (!doValidate()) return;
+    setSaving(true); setSaveMsg(null); setPostStep('saving');
     try {
       const res = await saveDipReading({ ...form, inputMethod: tab === 'ai' ? 'AI_PROMPT' : 'MANUAL' });
-      setSaveMsg({ type: 'ok', text: 'Draft saved (ID: ' + res.id.slice(0, 8) + '…)' });
-      setForm(emptyForm());
+      setSaveMsg({ type: 'ok', text: 'Draft saved. ID: ' + res.id.slice(0, 8) + '…' });
+      setForm(emptyForm()); setFieldErrors({}); setAiConfidence(null);
       loadHistory();
     } catch (e) {
       setSaveMsg({ type: 'err', text: e.message });
-    } finally { setSaving(false); }
+    } finally { setSaving(false); setPostStep(null); }
   }
 
   async function handleSaveAndPost() {
-    setSaving(true); setSaveMsg(null);
+    if (!doValidate()) return;
+    setSaving(true); setSaveMsg(null); setPostStep('saving');
     try {
       const saved = await saveDipReading({ ...form, inputMethod: tab === 'ai' ? 'AI_PROMPT' : 'MANUAL' });
+      setPostStep('posting');
       const post  = await saveDipToSAP(saved.id);
       setSaveMsg({
         type: post.success ? 'ok' : 'warn',
         text: post.success
-          ? 'Posted to SAP IS-Oil successfully.'
-          : 'Saved in CAP, SAP posting: ' + post.message
+          ? '✓ Dip reading posted to SAP IS-Oil successfully.'
+          : 'Saved in CAP. SAP posting: ' + post.message
       });
-      setForm(emptyForm());
+      setForm(emptyForm()); setFieldErrors({}); setAiConfidence(null);
       loadHistory();
     } catch (e) {
       setSaveMsg({ type: 'err', text: e.message });
-    } finally { setSaving(false); }
+    } finally { setSaving(false); setPostStep(null); }
   }
 
-  // ── Excel upload ────────────────────────────────────────────────────────────
+  // ── Excel ──────────────────────────────────────────────────────────────────
   function parseExcelFile(file) {
     const reader = new FileReader();
     reader.onload = e => {
       try {
-        const wb      = XLSX.read(new Uint8Array(e.target.result), { type: 'array' });
-        const ws      = wb.Sheets[wb.SheetNames[0]];
-        const raw     = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+        const wb  = XLSX.read(new Uint8Array(e.target.result), { type: 'array' });
+        const ws  = wb.Sheets[wb.SheetNames[0]];
+        const raw = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
         if (raw.length < 2) { setExcelErrors(['File appears empty']); return; }
-        const headers = raw[0];
-        const rows    = raw.slice(1).filter(r => r.some(c => c !== '')).map((r, i) => {
-          const mapped = mapExcelRow(headers, r);
-          mapped._row  = i + 2;
-          mapped._errs = validateRow(mapped);
-          return mapped;
+        const rows = raw.slice(1).filter(r => r.some(c => c !== '')).map((r, i) => {
+          const m  = mapExcelRow(raw[0], r);
+          m._row   = i + 2;
+          m._errs  = validateExcelRow(m);
+          return m;
         });
-        setExcelRows(rows);
-        setExcelErrors([]);
-        setBatchResult(null);
-      } catch (err) {
-        setExcelErrors(['Failed to parse file: ' + err.message]);
-      }
+        setExcelRows(rows); setExcelErrors([]); setBatchResult(null);
+      } catch (err) { setExcelErrors(['Failed to parse file: ' + err.message]); }
     };
     reader.readAsArrayBuffer(file);
   }
@@ -185,20 +306,24 @@ export default function DipEntry() {
     if (!valid.length) return;
     setBatchPosting(true); setBatchResult(null);
     try {
-      const savedIds = [];
+      const ids = [];
       for (const row of valid) {
-        const res = await saveDipReading({ ...row, dipType: (row.dipType || 'I').toUpperCase(), dipUnit: (row.dipUnit || 'MM').toUpperCase(), inputMethod: 'EXCEL' });
-        savedIds.push(res.id);
+        const res = await saveDipReading({
+          ...row,
+          dipType: (row.dipType || 'I').toUpperCase(),
+          dipUnit: (row.dipUnit || 'MM').toUpperCase(),
+          inputMethod: 'EXCEL'
+        });
+        ids.push(res.id);
       }
-      const result = await batchSaveDipsToSAP(savedIds);
-      setBatchResult(result);
+      setBatchResult(await batchSaveDipsToSAP(ids));
       loadHistory();
     } catch (e) {
       setBatchResult({ error: e.message });
     } finally { setBatchPosting(false); }
   }
 
-  // ── AI Prompt ───────────────────────────────────────────────────────────────
+  // ── AI Prompt ──────────────────────────────────────────────────────────────
   async function handleAiExtract() {
     if (!aiText.trim()) return;
     setAiExtracting(true); setAiError(null); setAiConfidence(null);
@@ -219,18 +344,17 @@ export default function DipEntry() {
         dipEvent:        res.dipEvent        || f.dipEvent,
         inputMethod:     'AI_PROMPT'
       }));
-      // If tank found, sync tankName
       if (res.tankId) {
         const t = tanks.find(x => x.tankId === res.tankId);
         if (t) setForm(f => ({ ...f, tankName: t.tankName }));
       }
+      setFieldErrors({});
       setTab('manual');
     } catch (e) {
       setAiError(e.message);
     } finally { setAiExtracting(false); }
   }
 
-  // ── Post from history ───────────────────────────────────────────────────────
   async function handlePostFromHistory(id) {
     try {
       const res = await saveDipToSAP(id);
@@ -241,180 +365,229 @@ export default function DipEntry() {
     }
   }
 
-  // ── Render ──────────────────────────────────────────────────────────────────
+  // ── Render ─────────────────────────────────────────────────────────────────
   return (
-    <div style={{ padding: '1.5rem' }}>
-      <h1 className="page-title">💧 Dip Entry</h1>
-      <p style={{ color: '#6c757d', marginBottom: '1.5rem', fontSize: '0.9rem' }}>
-        Create dip readings manually, via Excel upload, or using AI natural language extraction.
-        Readings are saved in CAP and optionally posted live to SAP IS-Oil via OGS_S4.
-      </p>
+    <div style={{ padding: '1.5rem', maxWidth: '1100px', margin: '0 auto' }}>
 
+      {/* Page header */}
+      <div style={{ marginBottom: '1.5rem' }}>
+        <h1 style={{ margin: 0, fontSize: '1.5rem', fontWeight: 700, color: '#1a2332' }}>
+          💧 Dip Entry
+        </h1>
+        <p style={{ margin: '0.4rem 0 0', color: '#6c757d', fontSize: '0.875rem' }}>
+          Create hydrocarbon tank dip readings — manual form, Excel upload, or AI natural language.
+          Readings are saved in the system and posted live to SAP IS-Oil via OGS_S4.
+        </p>
+      </div>
+
+      {/* Status banner */}
       {saveMsg && (
-        <div className={saveMsg.type === 'ok' ? 'success-banner' : saveMsg.type === 'warn' ? 'info-banner' : 'error-banner'}
-             style={{ marginBottom: '1rem' }}>
-          {saveMsg.type === 'ok' ? '✅' : saveMsg.type === 'warn' ? '⚠️' : '❌'} {saveMsg.text}
+        <div style={S.banner(saveMsg.type)}>
+          {saveMsg.text}
+          <button onClick={() => setSaveMsg(null)}
+            style={{ float: 'right', background: 'none', border: 'none', cursor: 'pointer', fontSize: '1rem', color: 'inherit', opacity: 0.6 }}>×</button>
         </div>
       )}
 
-      {/* ── Tab selector ── */}
-      <div style={{ display: 'flex', gap: '0', marginBottom: '0', borderBottom: '2px solid #dee2e6' }}>
+      {/* Post progress indicator */}
+      {postStep && (
+        <div style={{ ...S.banner('info'), display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+          <span style={{ fontSize: '1rem' }}>⏳</span>
+          <span>
+            {postStep === 'saving'  && 'Step 1/2 — Saving dip reading…'}
+            {postStep === 'posting' && 'Step 2/2 — Posting to SAP IS-Oil via OGS_S4…'}
+          </span>
+          {[1,2].map(n => (
+            <span key={n} style={{
+              width: 20, height: 6, borderRadius: 3,
+              background: (postStep === 'saving' && n === 1) || (postStep === 'posting' && n <= 2)
+                ? '#0d6efd' : '#dee2e6'
+            }} />
+          ))}
+        </div>
+      )}
+
+      {/* ── Tabs ── */}
+      <div style={{ display: 'flex', borderBottom: '2px solid #e0e4ea', marginBottom: '0' }}>
         {[
-          { id: 'manual', label: '✏️ Manual Entry' },
-          { id: 'excel',  label: '📊 Excel Upload' },
-          { id: 'ai',     label: '🤖 AI Prompt'    },
+          { id: 'manual', icon: '✏️', label: 'Manual Entry' },
+          { id: 'excel',  icon: '📊', label: 'Excel Upload' },
+          { id: 'ai',     icon: '🤖', label: 'AI Prompt'    },
         ].map(t => (
-          <button key={t.id}
-            onClick={() => setTab(t.id)}
-            style={{
-              padding: '0.6rem 1.25rem',
-              border: 'none', background: 'none', cursor: 'pointer',
-              borderBottom: tab === t.id ? '3px solid #0070f3' : '3px solid transparent',
-              fontWeight: tab === t.id ? 600 : 400,
-              color: tab === t.id ? '#0070f3' : '#495057',
-              fontSize: '0.9rem', marginBottom: '-2px'
-            }}>
-            {t.label}
+          <button key={t.id} onClick={() => setTab(t.id)} style={S.tab(tab === t.id)}>
+            {t.icon} {t.label}
           </button>
         ))}
       </div>
 
       {/* ── Manual Entry Tab ── */}
       {tab === 'manual' && (
-        <div className="card" style={{ marginTop: 0, borderTopLeftRadius: 0, borderTopRightRadius: 0 }}>
-          <div className="card-header">
-            {form.inputMethod === 'AI_PROMPT' ? '🤖 AI-extracted values — review and confirm' : 'Dip Reading Form'}
+        <div style={{ ...S.section, borderTopLeftRadius: 0 }}>
+          {form.inputMethod === 'AI_PROMPT' && (
+            <div style={{ ...S.banner('info'), margin: '1rem 1.25rem 0', borderRadius: '8px' }}>
+              🤖 <strong>AI-extracted values pre-filled below.</strong> Review carefully before saving — correct any fields as needed.
+            </div>
+          )}
+
+          {/* Tank Selection */}
+          <div style={{ ...S.sectionHead, marginTop: form.inputMethod === 'AI_PROMPT' ? 0 : undefined }}>
+            🏭 Tank &amp; Timing
           </div>
-          <div className="card-body">
-            <div className="form-row">
-              <div className="form-group">
-                <label className="form-label">Tank / Storage Object *</label>
-                <select className="input" value={form.tankId} onChange={handleTankSelect}>
-                  <option value="">— select tank —</option>
-                  {tanks.map(t => (
-                    <option key={t.tankId} value={t.tankId}>
-                      {t.tankId.replace(/^0+/, '') || t.tankId} — {t.tankName} ({t.plant})
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="form-group">
-                <label className="form-label">Tank Name</label>
-                <input className="input" value={form.tankName} onChange={setField('tankName')} placeholder="Auto-filled from tank selection" />
+          <div style={S.sectionBody}>
+            <div style={S.row2}>
+              <FormSelect
+                label="Tank / Storage Object" required
+                error={fieldErrors.tankId}
+                value={form.tankId} onChange={handleTankSelect}
+              >
+                <option value="">— select tank —</option>
+                {tanks.map(t => (
+                  <option key={t.tankId} value={t.tankId}>
+                    {t.tankId.replace(/^0+/, '') || t.tankId} — {t.tankName} ({t.plant})
+                  </option>
+                ))}
+              </FormSelect>
+              <FormInput label="Tank Name"
+                value={form.tankName} onChange={setField('tankName')}
+                placeholder="Auto-filled from tank selection"
+              />
+            </div>
+            <div style={S.row2}>
+              <FormInput label="Measurement Date" required type="date"
+                error={fieldErrors.measurementDate}
+                value={form.measurementDate} onChange={setField('measurementDate')}
+              />
+              <FormInput label="Measurement Time"
+                value={form.measurementTime} onChange={setField('measurementTime')}
+                placeholder="HHMMSS — e.g. 143000" maxLength={6}
+                hint="24-hour format without colons"
+              />
+            </div>
+          </div>
+
+          {/* Dip Measurement */}
+          <div style={S.sectionHead}>📏 Dip Measurement</div>
+          <div style={S.sectionBody}>
+            <div style={{ marginBottom: '1rem' }}>
+              <label style={S.label}>Dip Type<span style={S.req}>*</span></label>
+              <div style={{ display: 'flex', gap: '2rem', paddingTop: '0.4rem' }}>
+                {DIP_TYPES.map(d => (
+                  <label key={d.code} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', fontSize: '0.875rem' }}>
+                    <input type="radio" name="dipType" value={d.code}
+                      checked={form.dipType === d.code} onChange={setField('dipType')} />
+                    <span><strong>{d.code}</strong> — {d.label}</span>
+                  </label>
+                ))}
               </div>
             </div>
+            <div style={S.row3}>
+              <FormInput label="Dip Value" required type="number" step="0.001"
+                error={fieldErrors.dipValue}
+                value={form.dipValue} onChange={setField('dipValue')}
+                placeholder="e.g. 1842.500"
+              />
+              <FormSelect label="Unit" required value={form.dipUnit} onChange={setField('dipUnit')}>
+                {DIP_UNITS.map(u => <option key={u} value={u}>{u}</option>)}
+              </FormSelect>
+              <FormInput label="Dip Event"
+                value={form.dipEvent} onChange={setField('dipEvent')}
+                placeholder="e.g. Post-discharge" maxLength={50}
+              />
+            </div>
+            <div style={S.row2}>
+              <FormInput label="Water Height (optional)" type="number" step="0.001"
+                error={fieldErrors.waterHeight}
+                value={form.waterHeight} onChange={setField('waterHeight')}
+                placeholder="Free water level"
+              />
+              <FormSelect label="Water Height Unit" value={form.waterHeightUnit} onChange={setField('waterHeightUnit')}>
+                {DIP_UNITS.map(u => <option key={u} value={u}>{u}</option>)}
+              </FormSelect>
+            </div>
+          </div>
 
-            <div className="form-row">
-              <div className="form-group">
-                <label className="form-label">Measurement Date *</label>
-                <input type="date" className="input" value={form.measurementDate} onChange={setField('measurementDate')} />
-              </div>
-              <div className="form-group">
-                <label className="form-label">Measurement Time (HHMMSS)</label>
-                <input className="input" value={form.measurementTime} onChange={setField('measurementTime')}
-                  placeholder="e.g. 143000" maxLength={6} />
+          {/* QCI / ASTM Correction */}
+          <div style={S.sectionHead}>🌡 Quality / ASTM Correction (optional)</div>
+          <div style={S.sectionBody}>
+            <div style={S.row2}>
+              <FormInput label="Temperature (°C)" type="number" step="0.01"
+                error={fieldErrors.temperature}
+                value={form.temperature} onChange={setField('temperature')}
+                placeholder="e.g. 38.5"
+                hint="Used for VCF calculation"
+              />
+              <FormInput label="Density (kg/m³)" type="number" step="0.0001"
+                error={fieldErrors.density}
+                value={form.density} onChange={setField('density')}
+                placeholder="e.g. 850.0"
+                hint="Used for VCF calculation"
+              />
+            </div>
+            <div style={{ ...S.row2 }}>
+              <FormInput label="Notes"
+                value={form.notes} onChange={setField('notes')}
+                placeholder="Optional notes" maxLength={200}
+              />
+              <div /> {/* spacer */}
+            </div>
+          </div>
+
+          {/* Confidence banner (AI) */}
+          {aiConfidence && (
+            <div style={{ margin: '0 1.25rem' }}>
+              <div style={S.banner(aiConfidence === 'HIGH' ? 'ok' : aiConfidence === 'MEDIUM' ? 'warn' : 'err')}>
+                AI confidence: <strong>{aiConfidence}</strong>
+                {aiConfidence !== 'HIGH' && ' — Please review all extracted fields carefully before posting.'}
               </div>
             </div>
+          )}
 
-            <div className="form-row">
-              <div className="form-group">
-                <label className="form-label">Dip Type *</label>
-                <div style={{ display: 'flex', gap: '1.5rem', paddingTop: '0.5rem' }}>
-                  {DIP_TYPES.map(d => (
-                    <label key={d.code} style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', cursor: 'pointer' }}>
-                      <input type="radio" name="dipType" value={d.code}
-                        checked={form.dipType === d.code} onChange={setField('dipType')} />
-                      <strong>{d.code}</strong> — {d.label}
-                    </label>
-                  ))}
-                </div>
+          {/* Validation summary */}
+          {Object.keys(fieldErrors).length > 0 && (
+            <div style={{ margin: '0 1.25rem' }}>
+              <div style={S.banner('err')}>
+                <strong>Please fix the following before saving:</strong>
+                <ul style={{ margin: '0.4rem 0 0', paddingLeft: '1.25rem' }}>
+                  {Object.entries(fieldErrors).map(([k, v]) => <li key={k}>{v}</li>)}
+                </ul>
               </div>
             </div>
+          )}
 
-            <div className="form-row">
-              <div className="form-group">
-                <label className="form-label">Dip Value *</label>
-                <input type="number" step="0.001" className="input" value={form.dipValue} onChange={setField('dipValue')}
-                  placeholder="Physical measurement" />
-              </div>
-              <div className="form-group">
-                <label className="form-label">Unit *</label>
-                <select className="input" value={form.dipUnit} onChange={setField('dipUnit')}>
-                  {DIP_UNITS.map(u => <option key={u} value={u}>{u}</option>)}
-                </select>
-              </div>
-            </div>
-
-            <div className="form-row">
-              <div className="form-group">
-                <label className="form-label">Water Height (optional)</label>
-                <input type="number" step="0.001" className="input" value={form.waterHeight} onChange={setField('waterHeight')}
-                  placeholder="Free water level" />
-              </div>
-              <div className="form-group">
-                <label className="form-label">Water Height Unit</label>
-                <select className="input" value={form.waterHeightUnit} onChange={setField('waterHeightUnit')}>
-                  {DIP_UNITS.map(u => <option key={u} value={u}>{u}</option>)}
-                </select>
-              </div>
-            </div>
-
-            <div className="form-row">
-              <div className="form-group">
-                <label className="form-label">Temperature °C (QCI)</label>
-                <input type="number" step="0.01" className="input" value={form.temperature} onChange={setField('temperature')}
-                  placeholder="For ASTM/VCF correction" />
-              </div>
-              <div className="form-group">
-                <label className="form-label">Density kg/m³ (QCI)</label>
-                <input type="number" step="0.0001" className="input" value={form.density} onChange={setField('density')}
-                  placeholder="For ASTM/VCF correction" />
-              </div>
-            </div>
-
-            <div className="form-row">
-              <div className="form-group">
-                <label className="form-label">Dip Event</label>
-                <input className="input" value={form.dipEvent} onChange={setField('dipEvent')}
-                  placeholder="e.g. Post-discharge, End-of-day" maxLength={50} />
-              </div>
-              <div className="form-group">
-                <label className="form-label">Notes</label>
-                <input className="input" value={form.notes} onChange={setField('notes')} placeholder="Optional notes" maxLength={200} />
-              </div>
-            </div>
-
-            {aiConfidence && (
-              <div className="info-banner" style={{ marginBottom: '1rem' }}>
-                🤖 AI extraction confidence: <strong>{aiConfidence}</strong> — review all fields before posting.
-              </div>
-            )}
-
-            <div style={{ display: 'flex', gap: '0.75rem', marginTop: '1rem' }}>
-              <button className="btn btn-secondary" onClick={handleSaveDraft} disabled={saving}>
-                {saving ? 'Saving…' : '💾 Save Draft'}
+          {/* Action buttons */}
+          <div style={{ ...S.sectionBody, paddingTop: 0 }}>
+            <div style={S.btnRow}>
+              <button style={{ ...S.btnSecondary, opacity: saving ? 0.6 : 1 }}
+                onClick={handleSaveDraft} disabled={saving}>
+                {saving && postStep === 'saving' ? '⏳ Saving…' : '💾 Save Draft'}
               </button>
-              <button className="btn btn-primary" onClick={handleSaveAndPost} disabled={saving || !form.tankId || !form.dipValue}>
-                {saving ? 'Posting…' : '🚀 Save & Post to SAP'}
+              <button style={{ ...S.btnSuccess, opacity: (saving || !form.tankId || !form.dipValue) ? 0.6 : 1 }}
+                onClick={handleSaveAndPost} disabled={saving || !form.tankId || !form.dipValue}>
+                {saving && postStep === 'posting' ? '⏳ Posting to SAP…' : saving ? '⏳ Saving…' : '🚀 Save & Post to SAP'}
               </button>
-              <button className="btn btn-secondary" onClick={() => { setForm(emptyForm()); setSaveMsg(null); setAiConfidence(null); }}>
-                🔄 Reset
+              <button style={S.btnSecondary}
+                onClick={() => { setForm(emptyForm()); setSaveMsg(null); setFieldErrors({}); setAiConfidence(null); }}>
+                🔄 Reset Form
               </button>
             </div>
+            <p style={{ margin: '0.6rem 0 0', fontSize: '0.78rem', color: '#6c757d' }}>
+              <strong>Save Draft</strong> stores locally. <strong>Save &amp; Post to SAP</strong> posts to SAP IS-Oil via OGS_S4 (BAPI_CREATE_DIPS_EXT).
+              <span style={S.req}>*</span> Required fields.
+            </p>
           </div>
         </div>
       )}
 
       {/* ── Excel Upload Tab ── */}
       {tab === 'excel' && (
-        <div className="card" style={{ marginTop: 0, borderTopLeftRadius: 0, borderTopRightRadius: 0 }}>
-          <div className="card-header">Excel / CSV Upload</div>
-          <div className="card-body">
-            <p style={{ fontSize: '0.85rem', color: '#6c757d', marginBottom: '1rem' }}>
-              Supported formats: <strong>.xlsx</strong>, <strong>.xls</strong>, <strong>.csv</strong>.<br/>
-              Required columns: <code>SOCNR/tankId</code>, <code>Date</code>, <code>DipType (I/U)</code>, <code>DipQty/dipValue</code>, <code>DipQun/dipUnit</code>.<br/>
-              Optional: <code>Time</code>, <code>WaterHeight</code>, <code>Temperature</code>, <code>Density</code>, <code>DipEvent</code>, <code>Notes</code>.
-            </p>
+        <div style={{ ...S.section, borderTopLeftRadius: 0 }}>
+          <div style={S.sectionHead}>📊 Excel / CSV Upload</div>
+          <div style={S.sectionBody}>
+            <div style={{ background: '#f6f8fc', border: '1px solid #e0e4ea', borderRadius: '8px', padding: '0.85rem 1rem', marginBottom: '1rem', fontSize: '0.8rem', color: '#495057' }}>
+              <strong>Supported:</strong> .xlsx, .xls, .csv<br/>
+              <strong>Required columns:</strong> <code>SOCNR</code> / <code>tankId</code> · <code>Date</code> · <code>DipType (I/U)</code> · <code>DipQty</code> / <code>dipValue</code> · <code>DipQun</code> / <code>dipUnit</code><br/>
+              <strong>Optional:</strong> Time · WaterHeight · Temperature · Density · DipEvent · Notes
+            </div>
 
             <div
               onDragOver={e => { e.preventDefault(); setDragOver(true); }}
@@ -422,71 +595,70 @@ export default function DipEntry() {
               onDrop={handleFileDrop}
               onClick={() => fileInputRef.current?.click()}
               style={{
-                border: '2px dashed ' + (dragOver ? '#0070f3' : '#ced4da'),
-                borderRadius: '8px', padding: '2.5rem', textAlign: 'center', cursor: 'pointer',
-                background: dragOver ? '#f0f7ff' : '#fafafa', marginBottom: '1rem',
-                transition: 'all 0.15s'
+                border: '2px dashed ' + (dragOver ? '#0d6efd' : '#ced4da'),
+                borderRadius: '10px', padding: '2.5rem', textAlign: 'center', cursor: 'pointer',
+                background: dragOver ? '#f0f7ff' : '#fafafa', marginBottom: '1rem', transition: 'all 0.15s'
               }}>
-              <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>📂</div>
-              <div style={{ color: '#495057' }}>Drag &amp; drop file here, or click to browse</div>
-              <input ref={fileInputRef} type="file" accept=".xlsx,.xls,.csv" style={{ display: 'none' }}
-                onChange={handleFileDrop} />
+              <div style={{ fontSize: '2.5rem', marginBottom: '0.4rem' }}>📂</div>
+              <div style={{ color: '#495057', fontWeight: 600 }}>Drop file here or click to browse</div>
+              <div style={{ color: '#6c757d', fontSize: '0.8rem', marginTop: '0.2rem' }}>.xlsx · .xls · .csv</div>
+              <input ref={fileInputRef} type="file" accept=".xlsx,.xls,.csv" style={{ display: 'none' }} onChange={handleFileDrop} />
             </div>
 
             {excelErrors.length > 0 && (
-              <div className="error-banner" style={{ marginBottom: '1rem' }}>
-                {excelErrors.map((e, i) => <div key={i}>❌ {e}</div>)}
+              <div style={S.banner('err')}>
+                {excelErrors.map((e, i) => <div key={i}>⚠ {e}</div>)}
               </div>
             )}
 
             {excelRows.length > 0 && (
               <>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
-                  <span style={{ fontSize: '0.9rem' }}>
-                    <strong>{excelRows.length}</strong> rows found —{' '}
-                    <span style={{ color: '#28a745' }}>{excelRows.filter(r => r._errs.length === 0).length} valid</span>,{' '}
-                    <span style={{ color: '#dc3545' }}>{excelRows.filter(r => r._errs.length > 0).length} invalid</span>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+                  <span style={{ fontSize: '0.875rem' }}>
+                    <strong>{excelRows.length}</strong> rows — {' '}
+                    <span style={{ color: '#198754', fontWeight: 600 }}>{excelRows.filter(r => !r._errs.length).length} valid</span>
+                    , <span style={{ color: '#dc3545', fontWeight: 600 }}>{excelRows.filter(r => r._errs.length).length} invalid</span>
                   </span>
-                  <button className="btn btn-primary" onClick={handleBatchPost}
-                    disabled={batchPosting || excelRows.filter(r => r._errs.length === 0).length === 0}>
-                    {batchPosting ? 'Posting…' : '🚀 Post All Valid to SAP'}
+                  <button style={{ ...S.btnSuccess, opacity: (batchPosting || !excelRows.filter(r => !r._errs.length).length) ? 0.6 : 1 }}
+                    onClick={handleBatchPost}
+                    disabled={batchPosting || !excelRows.filter(r => !r._errs.length).length}>
+                    {batchPosting ? '⏳ Posting…' : '🚀 Post All Valid to SAP'}
                   </button>
                 </div>
 
                 {batchResult && (
-                  <div className={batchResult.error ? 'error-banner' : 'success-banner'} style={{ marginBottom: '1rem' }}>
+                  <div style={S.banner(batchResult.error ? 'err' : 'ok')}>
                     {batchResult.error
-                      ? '❌ ' + batchResult.error
-                      : `✅ Submitted: ${batchResult.submitted} | Failed: ${batchResult.failed}${batchResult.messages ? ' — ' + batchResult.messages : ''}`
-                    }
+                      ? '⚠ ' + batchResult.error
+                      : '✓ Submitted: ' + batchResult.submitted + ' | Failed: ' + batchResult.failed + (batchResult.messages ? ' — ' + batchResult.messages : '')}
                   </div>
                 )}
 
-                <div style={{ overflowX: 'auto' }}>
-                  <table className="data-table">
+                <div style={{ overflowX: 'auto', borderRadius: '8px', border: '1px solid #e0e4ea' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem' }}>
                     <thead>
-                      <tr>
-                        <th>Row</th><th>Tank ID</th><th>Date</th><th>Type</th>
-                        <th>Value</th><th>Unit</th><th>Temp</th><th>Density</th>
-                        <th>Event</th><th>Status</th>
+                      <tr style={{ background: '#f6f8fc' }}>
+                        {['Row','Tank ID','Date','Type','Value','Unit','Temp','Density','Event','Status'].map(h => (
+                          <th key={h} style={{ padding: '0.5rem 0.65rem', textAlign: 'left', borderBottom: '2px solid #e0e4ea', fontWeight: 700, color: '#495057', whiteSpace: 'nowrap' }}>{h}</th>
+                        ))}
                       </tr>
                     </thead>
                     <tbody>
                       {excelRows.map((r, i) => (
-                        <tr key={i} style={{ background: r._errs.length > 0 ? '#fff5f5' : undefined }}>
-                          <td>{r._row}</td>
-                          <td>{r.tankId || <span style={{ color: '#dc3545' }}>missing</span>}</td>
-                          <td>{r.measurementDate || '–'}</td>
-                          <td>{r.dipType || '–'}</td>
-                          <td style={{ textAlign: 'right' }}>{r.dipValue || '–'}</td>
-                          <td>{r.dipUnit || '–'}</td>
-                          <td>{r.temperature || '–'}</td>
-                          <td>{r.density || '–'}</td>
-                          <td>{r.dipEvent || '–'}</td>
-                          <td>
+                        <tr key={i} style={{ background: r._errs.length ? '#fff5f5' : i % 2 ? '#fafafa' : '#fff', borderBottom: '1px solid #f0f0f0' }}>
+                          <td style={{ padding: '0.45rem 0.65rem', color: '#6c757d' }}>{r._row}</td>
+                          <td style={{ padding: '0.45rem 0.65rem', fontWeight: 600 }}>{r.tankId || <span style={{ color: '#dc3545' }}>missing</span>}</td>
+                          <td style={{ padding: '0.45rem 0.65rem' }}>{r.measurementDate || '–'}</td>
+                          <td style={{ padding: '0.45rem 0.65rem' }}>{r.dipType || '–'}</td>
+                          <td style={{ padding: '0.45rem 0.65rem', textAlign: 'right' }}>{r.dipValue || '–'}</td>
+                          <td style={{ padding: '0.45rem 0.65rem' }}>{r.dipUnit || '–'}</td>
+                          <td style={{ padding: '0.45rem 0.65rem' }}>{r.temperature || '–'}</td>
+                          <td style={{ padding: '0.45rem 0.65rem' }}>{r.density || '–'}</td>
+                          <td style={{ padding: '0.45rem 0.65rem' }}>{r.dipEvent || '–'}</td>
+                          <td style={{ padding: '0.45rem 0.65rem' }}>
                             {r._errs.length === 0
-                              ? <span className="badge badge-ok">✓ Valid</span>
-                              : <span className="badge badge-urgent" title={r._errs.join('; ')}>⚠ {r._errs.length} error{r._errs.length > 1 ? 's' : ''}</span>
+                              ? <span style={{ color: '#198754', fontWeight: 700, fontSize: '0.75rem' }}>✓ Valid</span>
+                              : <span style={{ color: '#dc3545', fontWeight: 700, fontSize: '0.75rem', cursor: 'help' }} title={r._errs.join('; ')}>⚠ {r._errs.length} error{r._errs.length > 1 ? 's' : ''}</span>
                             }
                           </td>
                         </tr>
@@ -502,97 +674,149 @@ export default function DipEntry() {
 
       {/* ── AI Prompt Tab ── */}
       {tab === 'ai' && (
-        <div className="card" style={{ marginTop: 0, borderTopLeftRadius: 0, borderTopRightRadius: 0 }}>
-          <div className="card-header">🤖 AI Natural Language Extraction</div>
-          <div className="card-body">
-            <p style={{ fontSize: '0.85rem', color: '#6c757d', marginBottom: '1rem' }}>
-              Describe the dip reading in natural language. The AI (SAP AI Core — <code>aicore</code> destination) will extract the structured parameters
+        <div style={{ ...S.section, borderTopLeftRadius: 0 }}>
+          <div style={S.sectionHead}>🤖 AI Natural Language Extraction</div>
+          <div style={S.sectionBody}>
+            <p style={{ margin: '0 0 1rem', fontSize: '0.875rem', color: '#495057', lineHeight: 1.6 }}>
+              Describe the dip reading in plain English. The AI (SAP AI Core — <code>aicore</code> destination) will extract all structured fields
               and pre-fill the Manual Entry form for your review before saving.
             </p>
-            <div style={{ background: '#f8f9fa', border: '1px solid #dee2e6', borderRadius: '6px', padding: '0.75rem', marginBottom: '1rem', fontSize: '0.8rem', color: '#495057' }}>
-              <strong>Examples:</strong><br/>
-              • "Tank 23 innage reading 1842 mm at 14:30 today, temperature 38.5°C, density 850 kg/m3"<br/>
-              • "Storage object 00000000000000000023, ullage 2500 MM, water height 45 MM, post-discharge event, 2026-10-06"<br/>
-              • "Dip tank TERM-1743 tank 23: 1850mm innage, 09:00, temp 40C, density 856"
+
+            {/* Example prompts */}
+            <div style={{ background: '#f6f8fc', borderRadius: '8px', border: '1px solid #e0e4ea', padding: '0.85rem 1rem', marginBottom: '1rem' }}>
+              <div style={{ fontWeight: 700, fontSize: '0.8rem', color: '#495057', marginBottom: '0.5rem' }}>Examples:</div>
+              {[
+                'Tank 23 innage reading 1842 mm at 14:30 today, temperature 38.5°C, density 850 kg/m3',
+                'Storage object 00000000000000000023, ullage 2500 MM, water height 45 MM, post-discharge event, 2026-10-06',
+                'Dip tank 5: 1850mm innage, 09:00, temp 40°C, density 856, end-of-day measurement',
+              ].map((ex, i) => (
+                <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: '0.5rem', marginBottom: i < 2 ? '0.35rem' : 0 }}>
+                  <span style={{ color: '#6c757d', fontSize: '0.75rem', paddingTop: '0.05rem', flexShrink: 0 }}>▸</span>
+                  <button
+                    onClick={() => setAiText(ex)}
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left', color: '#0d6efd', fontSize: '0.8rem', padding: 0, textDecoration: 'underline dotted' }}>
+                    {ex}
+                  </button>
+                </div>
+              ))}
             </div>
-            <textarea
-              className="input textarea"
-              rows={5}
-              value={aiText}
-              onChange={e => setAiText(e.target.value)}
-              placeholder="Describe the dip reading here…"
-              style={{ width: '100%', resize: 'vertical', marginBottom: '1rem' }}
-            />
+
+            <div style={{ marginBottom: '1rem' }}>
+              <label style={S.label}>Your description</label>
+              <textarea
+                style={{ ...S.input, resize: 'vertical', minHeight: '100px', fontFamily: 'inherit', lineHeight: 1.5 }}
+                rows={4}
+                value={aiText}
+                onChange={e => setAiText(e.target.value)}
+                placeholder="Describe the dip reading here…"
+              />
+            </div>
+
+            {/* AI Error with detail */}
             {aiError && (
-              <div className="error-banner" style={{ marginBottom: '1rem' }}>❌ {aiError}</div>
+              <div style={{ ...S.banner('err'), marginBottom: '1rem' }}>
+                <div style={{ fontWeight: 700, marginBottom: '0.35rem' }}>⚠ AI extraction failed</div>
+                <div style={{ fontSize: '0.8rem', opacity: 0.9, wordBreak: 'break-word' }}>
+                  {aiError.includes('AI Core call failed:')
+                    ? <>
+                        <strong>Cause:</strong> SAP AI Core could not be reached.<br/>
+                        <details style={{ marginTop: '0.3rem' }}>
+                          <summary style={{ cursor: 'pointer', color: 'inherit', fontSize: '0.78rem' }}>Technical details</summary>
+                          <code style={{ fontSize: '0.75rem', display: 'block', marginTop: '0.25rem', whiteSpace: 'pre-wrap', opacity: 0.8 }}>{aiError}</code>
+                        </details>
+                        <div style={{ marginTop: '0.4rem', fontSize: '0.78rem', color: 'inherit', opacity: 0.85 }}>
+                          Check that the <code>aicore</code> BTP destination is configured and the AI Core deployment is running.
+                          You can still enter the dip reading manually in the <strong>Manual Entry</strong> tab.
+                        </div>
+                      </>
+                    : aiError
+                  }
+                </div>
+              </div>
             )}
-            <div style={{ display: 'flex', gap: '0.75rem' }}>
-              <button className="btn btn-primary" onClick={handleAiExtract}
-                disabled={aiExtracting || !aiText.trim()}>
+
+            <div style={S.btnRow}>
+              <button style={{ ...S.btnPrimary, opacity: (aiExtracting || !aiText.trim()) ? 0.6 : 1 }}
+                onClick={handleAiExtract} disabled={aiExtracting || !aiText.trim()}>
                 {aiExtracting ? '⏳ Extracting…' : '✨ Extract & Fill Form'}
               </button>
-              <button className="btn btn-secondary" onClick={() => { setAiText(''); setAiError(null); }}>
+              <button style={S.btnSecondary} onClick={() => { setAiText(''); setAiError(null); }}>
                 🔄 Clear
               </button>
             </div>
-            <p style={{ marginTop: '0.75rem', fontSize: '0.8rem', color: '#6c757d' }}>
-              After extraction, the Manual Entry tab will open with pre-filled values. Review and confirm before saving.
+            <p style={{ marginTop: '0.75rem', fontSize: '0.78rem', color: '#6c757d' }}>
+              After extraction, the <strong>Manual Entry</strong> tab opens with pre-filled values.
+              Review all fields — especially tank ID, dip value, and date — before posting to SAP.
             </p>
           </div>
         </div>
       )}
 
-      {/* ── Recent Dip Readings ── */}
-      <div className="card" style={{ marginTop: '1.5rem' }}>
-        <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <span>Recent Dip Readings</span>
-          <button className="btn btn-secondary" onClick={loadHistory} disabled={histLoading} style={{ fontSize: '0.8rem', padding: '0.3rem 0.75rem' }}>
+      {/* ── Recent Dip Readings ─────────────────────────────────────────────── */}
+      <div style={S.section}>
+        <div style={{ ...S.sectionHead, justifyContent: 'space-between' }}>
+          <span>📋 Recent Dip Readings</span>
+          <button style={{ ...S.btnSecondary, fontSize: '0.78rem', padding: '0.25rem 0.65rem' }}
+            onClick={loadHistory} disabled={histLoading}>
             {histLoading ? '…' : '↻ Refresh'}
           </button>
         </div>
-        <div className="card-body" style={{ padding: 0 }}>
+        <div style={{ padding: 0 }}>
           {histLoading ? (
-            <div style={{ padding: '1rem', color: '#6c757d' }}>Loading…</div>
+            <div style={{ padding: '1.5rem', textAlign: 'center', color: '#6c757d', fontSize: '0.875rem' }}>Loading…</div>
           ) : history.length === 0 ? (
-            <div style={{ padding: '1rem', color: '#6c757d' }}>No dip readings found. Create one above.</div>
+            <div style={{ padding: '1.5rem', textAlign: 'center', color: '#6c757d', fontSize: '0.875rem' }}>
+              No dip readings yet. Create one using the tabs above.
+            </div>
           ) : (
             <div style={{ overflowX: 'auto' }}>
-              <table className="data-table">
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem' }}>
                 <thead>
-                  <tr>
-                    <th>Tank</th><th>Date / Time</th><th>Type</th><th>Value</th>
-                    <th>Temp</th><th>Input</th><th>Status</th><th>Action</th>
+                  <tr style={{ background: '#f6f8fc' }}>
+                    {['Tank','Date / Time','Type','Dip Value','Water Ht','Temp','Method','Status','Action'].map(h => (
+                      <th key={h} style={{ padding: '0.6rem 0.85rem', textAlign: 'left', borderBottom: '2px solid #e0e4ea', fontWeight: 700, color: '#495057', whiteSpace: 'nowrap' }}>{h}</th>
+                    ))}
                   </tr>
                 </thead>
                 <tbody>
-                  {history.map(d => {
-                    const badge = STATUS_BADGE[d.postingStatus] || { label: d.postingStatus, cls: 'badge-pending' };
+                  {history.map((d, i) => {
+                    const sc = STATUS_CFG[d.postingStatus] || { label: d.postingStatus, color: '#6c757d', bg: '#f8f9fa' };
                     return (
-                      <tr key={d.ID}>
-                        <td>
-                          <strong>{(d.tankId || '').replace(/^0+/, '') || d.tankId}</strong>
-                          {d.tankName && <div style={{ fontSize: '0.75rem', color: '#6c757d' }}>{d.tankName}</div>}
+                      <tr key={d.ID} style={{ background: i % 2 ? '#fafafa' : '#fff', borderBottom: '1px solid #f0f0f0' }}>
+                        <td style={{ padding: '0.55rem 0.85rem' }}>
+                          <span style={{ fontWeight: 700, color: '#1a2332' }}>{(d.tankId || '').replace(/^0+/, '') || d.tankId}</span>
+                          {d.tankName && <div style={{ fontSize: '0.72rem', color: '#6c757d', marginTop: '0.1rem' }}>{d.tankName}</div>}
                         </td>
-                        <td>
-                          {d.measurementDate}
-                          {d.measurementTime ? <div style={{ fontSize: '0.75rem', color: '#6c757d' }}>{d.measurementTime.slice(0,2)}:{d.measurementTime.slice(2,4)}</div> : ''}
+                        <td style={{ padding: '0.55rem 0.85rem', whiteSpace: 'nowrap' }}>
+                          <span style={{ fontWeight: 500 }}>{d.measurementDate}</span>
+                          {d.measurementTime ? <div style={{ fontSize: '0.72rem', color: '#6c757d' }}>{d.measurementTime.slice(0,2)}:{d.measurementTime.slice(2,4)}</div> : ''}
                         </td>
-                        <td>{d.dipType === 'I' ? 'Innage' : d.dipType === 'U' ? 'Ullage' : d.dipType}</td>
-                        <td style={{ textAlign: 'right' }}>
-                          {parseFloat(d.dipValue || 0).toFixed(1)} {d.dipUnit}
-                          {d.waterHeight ? <div style={{ fontSize: '0.75rem', color: '#6c757d' }}>Water: {d.waterHeight}</div> : ''}
-                        </td>
-                        <td>{d.temperature != null ? d.temperature + ' °C' : '–'}</td>
-                        <td style={{ fontSize: '0.75rem' }}>{INPUT_METHODS[d.inputMethod] || d.inputMethod}</td>
-                        <td>
-                          <span className={'badge ' + badge.cls} title={d.bapiResponse || ''}>
-                            {badge.label}
+                        <td style={{ padding: '0.55rem 0.85rem' }}>
+                          <span title={d.dipType === 'I' ? 'Innage' : d.dipType === 'U' ? 'Ullage' : ''}>
+                            {d.dipType === 'I' ? 'I – Innage' : d.dipType === 'U' ? 'U – Ullage' : d.dipType}
                           </span>
                         </td>
-                        <td>
+                        <td style={{ padding: '0.55rem 0.85rem', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+                          {parseFloat(d.dipValue || 0).toFixed(1)} {d.dipUnit}
+                        </td>
+                        <td style={{ padding: '0.55rem 0.85rem', textAlign: 'right', color: d.waterHeight ? '#1a2332' : '#adb5bd' }}>
+                          {d.waterHeight ? parseFloat(d.waterHeight).toFixed(1) : '–'}
+                        </td>
+                        <td style={{ padding: '0.55rem 0.85rem', textAlign: 'right', color: d.temperature != null ? '#1a2332' : '#adb5bd' }}>
+                          {d.temperature != null ? d.temperature + ' °C' : '–'}
+                        </td>
+                        <td style={{ padding: '0.55rem 0.85rem', fontSize: '0.75rem', color: '#6c757d' }}>
+                          {INPUT_METHODS[d.inputMethod] || d.inputMethod}
+                        </td>
+                        <td style={{ padding: '0.55rem 0.85rem' }}>
+                          <span style={S.badge(sc)} title={d.bapiResponse || ''}>
+                            {sc.label}
+                          </span>
+                        </td>
+                        <td style={{ padding: '0.55rem 0.85rem' }}>
                           {(d.postingStatus === 'DRAFT' || d.postingStatus === 'FAILED') && (
-                            <button className="btn btn-primary"
-                              style={{ fontSize: '0.75rem', padding: '0.2rem 0.6rem' }}
+                            <button
+                              style={{ ...S.btnSuccess, fontSize: '0.73rem', padding: '0.2rem 0.55rem' }}
                               onClick={() => handlePostFromHistory(d.ID)}>
                               Post to SAP
                             </button>

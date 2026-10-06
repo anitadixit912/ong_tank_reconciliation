@@ -41,8 +41,13 @@ async function action(name, body) {
     body: JSON.stringify(body)
   });
   if (!res.ok) {
-    var msg = res.statusText;
-    try { var j = await res.json(); msg = (j.error && j.error.message) || JSON.stringify(j); } catch (_) {}
+    var msg = res.statusText || ('HTTP ' + res.status);
+    try {
+      var j = await res.json();
+      msg = (j.error && j.error.message) ||
+            (j.error && j.error.innererror && j.error.innererror.message) ||
+            j.message || JSON.stringify(j);
+    } catch (_) {}
     var err = new Error(msg);
     err.status = res.status;
     throw err;
@@ -185,7 +190,17 @@ export async function fetchDipReadings(params) {
 }
 
 export async function saveDipReading(fields) {
-  return action('saveDipReading', fields);
+  const clean = { ...fields };
+  ['dipValue', 'waterHeight', 'temperature', 'density'].forEach(f => {
+    const v = clean[f];
+    if (v === '' || v === undefined || v === null) {
+      clean[f] = null;
+    } else {
+      const n = parseFloat(v);
+      clean[f] = isNaN(n) ? null : n;
+    }
+  });
+  return action('saveDipReading', clean);
 }
 
 export async function saveDipToSAP(dipReadingId) {
