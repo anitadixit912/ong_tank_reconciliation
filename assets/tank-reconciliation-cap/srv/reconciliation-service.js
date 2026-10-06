@@ -1369,17 +1369,30 @@ module.exports = class ReconciliationService extends cds.ApplicationService {
         const authHeader = _basicAuthHeader(cfg);
         const proxyOpts  = cfg._proxyHost ? { host: cfg._proxyHost, port: cfg._proxyPort, token: cfg._proxyToken, locationId: cfg._locationId } : null;
 
-        // CSRF token fetch
+        // CSRF token fetch — use $top=0 to avoid fetching data, just get the token+cookie
         const tokenHeaders = { Accept: 'application/json', 'x-csrf-token': 'Fetch' };
         if (authHeader) tokenHeaders['Authorization'] = authHeader;
-        const tokenRes    = await _httpGet(baseUrl + S4_DIP_PATH + '/TankDipSet', tokenHeaders, proxyOpts);
-        const csrfToken   = (tokenRes.headers && (tokenRes.headers['x-csrf-token'] || tokenRes.headers['X-CSRF-Token'])) || null;
+        const tokenRes    = await _httpGet(baseUrl + S4_DIP_PATH + '/TankDipSet?$top=0', tokenHeaders, proxyOpts);
+        let csrfToken     = (tokenRes.headers && (tokenRes.headers['x-csrf-token'] || tokenRes.headers['X-CSRF-Token'])) || null;
+        // SAP returns 'Required' as a placeholder — not an actual token
+        if (csrfToken === 'Required' || csrfToken === 'required') csrfToken = null;
+
+        // If entity set didn't return CSRF token, retry against service document root
+        if (!csrfToken) {
+          const rootRes = await _httpGet(baseUrl + S4_DIP_PATH + '/', tokenHeaders, proxyOpts);
+          csrfToken = (rootRes.headers && (rootRes.headers['x-csrf-token'] || rootRes.headers['X-CSRF-Token'])) || null;
+          if (csrfToken === 'Required' || csrfToken === 'required') csrfToken = null;
+          cds.log('dip').info('saveDipToSAP: CSRF retry (root) CSRF=' + (csrfToken ? csrfToken.slice(0,8) + '…' : 'MISSING') + ' status=' + rootRes.status);
+        }
+
         const setCookie   = tokenRes.headers && tokenRes.headers['set-cookie'];
         let sessionCookie = '';
         if (setCookie) {
           const cookies = Array.isArray(setCookie) ? setCookie : [setCookie];
           sessionCookie = cookies.map(c => c.split(';')[0]).join('; ');
         }
+
+        cds.log('dip').info('saveDipToSAP: CSRF=' + (csrfToken ? csrfToken.slice(0,8) + '…' : 'MISSING') + ' cookie=' + (sessionCookie ? 'found' : 'MISSING') + ' tokenStatus=' + tokenRes.status);
 
         // Build dip timestamp YYYYMMDDHHMMSS
         const dateStr = (dip.measurementDate || '').replace(/-/g, '');
@@ -1414,7 +1427,19 @@ module.exports = class ReconciliationService extends cds.ApplicationService {
           return { success: false, message: msg };
         } else {
           let errMsg = 'HTTP ' + res.status;
-          try { errMsg = JSON.parse(res.body)?.error?.message?.value || errMsg; } catch (_) {}
+          try {
+            const j = JSON.parse(res.body);
+            errMsg = j?.error?.message?.value || j?.error?.message || errMsg;
+          } catch (_) {
+            // Not JSON — try XML <message> tag, then fall back to body snippet
+            const xmlMatch = res.body && res.body.match(/<message[^>]*>([^<]+)<\/message>/i);
+            if (xmlMatch) {
+              errMsg = 'HTTP ' + res.status + ': ' + xmlMatch[1].trim();
+            } else if (res.body && res.body.length > 0 && !res.body.trim().startsWith('<html')) {
+              errMsg = 'HTTP ' + res.status + ': ' + res.body.slice(0, 300);
+            }
+          }
+          cds.log('dip').warn('saveDipToSAP POST failed: ' + errMsg + ' | raw: ' + res.body.slice(0, 200));
           await UPDATE('tank.reconciliation.DipReading').set({ postingStatus: 'FAILED', bapiResponse: errMsg }).where({ ID: dipReadingId });
           return { success: false, message: errMsg };
         }

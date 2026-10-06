@@ -14,12 +14,138 @@ const DIP_TYPES   = [{ code: 'I', label: 'Innage (depth from bottom)' }, { code:
 const INPUT_METHODS = { MANUAL: '✏️ Manual', EXCEL: '📊 Excel', AI_PROMPT: '🤖 AI' };
 
 const STATUS_CFG = {
-  DRAFT:        { label: 'Draft',        color: '#6c757d', bg: '#f8f9fa'  },
-  SUBMITTED:    { label: 'Submitted',    color: '#0d6efd', bg: '#e7f1ff'  },
-  POSTED:       { label: '✓ Posted',     color: '#198754', bg: '#d1e7dd'  },
-  FAILED:       { label: '✗ Failed',     color: '#dc3545', bg: '#f8d7da'  },
-  PENDING_ABAP: { label: 'Pending ABAP', color: '#fd7e14', bg: '#fff3cd'  },
+  DRAFT:        { label: 'Draft',          color: '#6c757d', bg: '#f8f9fa'  },
+  SUBMITTED:    { label: 'Submitted',      color: '#0d6efd', bg: '#e7f1ff'  },
+  POSTED:       { label: '✓ Posted',       color: '#198754', bg: '#d1e7dd'  },
+  FAILED:       { label: '✗ Failed ⓘ',    color: '#dc3545', bg: '#f8d7da', clickable: true },
+  PENDING_ABAP: { label: '⏸ Pending ABAP ⓘ', color: '#fd7e14', bg: '#fff3cd', clickable: true },
 };
+
+function DipDetailModal({ dip, onClose, onRetry }) {
+  if (!dip) return null;
+  const advice = getAdvice(dip);
+  const sc = STATUS_CFG[dip.postingStatus] || STATUS_CFG.FAILED;
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 1000,
+      display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem'
+    }} onClick={onClose}>
+      <div style={{
+        background: '#fff', borderRadius: '12px', width: '100%', maxWidth: '560px',
+        boxShadow: '0 8px 40px rgba(0,0,0,0.25)', overflow: 'hidden'
+      }} onClick={e => e.stopPropagation()}>
+        <div style={{ background: sc.bg, borderBottom: '1px solid ' + sc.color + '55', padding: '1rem 1.25rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span style={{ fontWeight: 700, color: sc.color, fontSize: '1rem' }}>{advice ? advice.title : 'Posting Details'}</span>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '1.25rem', color: '#6c757d', lineHeight: 1 }}>×</button>
+        </div>
+        <div style={{ padding: '1.25rem' }}>
+          <div style={{ background: '#f6f8fc', borderRadius: '8px', padding: '0.75rem 1rem', marginBottom: '1rem', fontSize: '0.8rem', color: '#495057' }}>
+            <div><strong>Tank:</strong> {(dip.tankId || '').replace(/^0+/, '') || dip.tankId}{dip.tankName ? ' — ' + dip.tankName : ''}</div>
+            <div><strong>Date / Time:</strong> {dip.measurementDate} {dip.measurementTime ? dip.measurementTime.slice(0,2) + ':' + dip.measurementTime.slice(2,4) : ''}</div>
+            <div><strong>Value:</strong> {dip.dipValue} {dip.dipUnit}</div>
+            <div><strong>Input:</strong> {INPUT_METHODS[dip.inputMethod] || dip.inputMethod}</div>
+          </div>
+          {dip.bapiResponse && (
+            <div style={{ background: '#fff8f8', border: '1px solid #f5c2c7', borderRadius: '8px', padding: '0.75rem 1rem', marginBottom: '1rem' }}>
+              <div style={{ fontWeight: 700, fontSize: '0.8rem', color: '#58151c', marginBottom: '0.3rem' }}>SAP Error Message:</div>
+              <code style={{ fontSize: '0.78rem', color: '#495057', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{dip.bapiResponse}</code>
+            </div>
+          )}
+          {advice && advice.steps.length > 0 && (
+            <div style={{ marginBottom: '1rem' }}>
+              <div style={{ fontWeight: 700, fontSize: '0.85rem', color: '#1a2332', marginBottom: '0.5rem' }}>💡 What to do:</div>
+              <ol style={{ margin: 0, paddingLeft: '1.5rem', fontSize: '0.825rem', color: '#495057', lineHeight: 1.7 }}>
+                {advice.steps.map((s, i) => <li key={i}>{s}</li>)}
+              </ol>
+            </div>
+          )}
+          <div style={{ display: 'flex', gap: '0.6rem' }}>
+            {(dip.postingStatus === 'FAILED' || dip.postingStatus === 'DRAFT') && (
+              <button style={{ padding: '0.45rem 1rem', background: '#198754', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 600, fontSize: '0.85rem' }}
+                onClick={() => { onRetry(dip.ID); onClose(); }}>
+                🚀 Retry — Post to SAP
+              </button>
+            )}
+            <button style={{ padding: '0.45rem 1rem', background: '#fff', color: '#495057', border: '1px solid #ced4da', borderRadius: '6px', cursor: 'pointer', fontSize: '0.85rem' }}
+              onClick={onClose}>Close</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function getAdvice(dip) {
+  const bapi = (dip.bapiResponse || '').toLowerCase();
+  if (dip.postingStatus === 'PENDING_ABAP') {
+    return {
+      title: 'Pending ABAP — CREATE not yet enabled',
+      steps: [
+        'The SAP IS-Oil OData service (ZTANK_DIP_SRV_SRV) does not support CREATE on TankDipSet.',
+        'The dip reading is safely stored in the system — no data has been lost.',
+        'Contact the OGS ABAP team to activate the CREATE operation on TankDipSet in SEGW.',
+        'Once the ABAP service is updated, click "Post to SAP" on this row to retry.',
+      ],
+      severity: 'warn',
+    };
+  }
+  if (dip.postingStatus === 'FAILED') {
+    if (bapi.includes('403') || bapi.includes('csrf')) {
+      return {
+        title: 'HTTP 403 — CSRF Token or Authorization Failure',
+        steps: [
+          'SAP Gateway rejected the request. This usually means either the CSRF token is missing, or the OGS_S4 user lacks CREATE authorization.',
+          'Try clicking "Post to SAP" again — a fresh CSRF token will be fetched automatically.',
+          'If it fails again with 403, the OGS_S4 destination user needs the CREATE authorization for BAPI_CREATE_DIPS_EXT in SAP (contact Basis team).',
+          'Authorization objects to check: B_TANKDIP (or the IS-Oil equivalent for dip creation).',
+        ],
+        severity: 'err',
+      };
+    }
+    if (bapi.includes('405')) {
+      return {
+        title: 'HTTP 405 — CREATE Not Supported on This Service',
+        steps: [
+          'The OData service ZTANK_DIP_SRV_SRV does not accept POST on TankDipSet.',
+          'This is an ABAP/SEGW configuration issue. The entity set is read-only.',
+          'Contact the OGS ABAP team: in SEGW, the TankDipSet entity must have "Creatable" = true.',
+        ],
+        severity: 'err',
+      };
+    }
+    if (bapi.includes('401')) {
+      return {
+        title: 'HTTP 401 — Authentication Failed',
+        steps: [
+          'The OGS_S4 BTP destination credentials are incorrect or expired.',
+          'Check the OGS_S4 destination in BTP Cockpit: verify the username and password are current.',
+        ],
+        severity: 'err',
+      };
+    }
+    if (bapi.includes('destination') || bapi.includes('url not found')) {
+      return {
+        title: 'Destination Configuration Error',
+        steps: [
+          'The OGS_S4 BTP destination is not reachable from the CAP service.',
+          'Check BTP Cockpit → Destinations → OGS_S4: verify URL, credentials, and Cloud Connector.',
+          'Check Cloud Connector is running and APAC_DEV10 location is connected.',
+        ],
+        severity: 'err',
+      };
+    }
+    return {
+      title: 'SAP Posting Failed',
+      steps: [
+        'The dip reading was saved in the system but could not be posted to SAP IS-Oil.',
+        'Review the error message below and retry by clicking "Post to SAP".',
+        'If the error persists, check the OGS_S4 destination and Cloud Connector connectivity.',
+      ],
+      severity: 'err',
+    };
+  }
+  return null;
+}
 
 const EXCEL_COL_ALIASES = {
   tankId:          ['tankid','socnr','storage_object','storageobject','tank_id','tank id','socnr_number'],
@@ -194,6 +320,7 @@ export default function DipEntry() {
   const [saving, setSaving]             = useState(false);
   const [saveMsg, setSaveMsg]           = useState(null);
   const [postStep, setPostStep]         = useState(null); // null | 'saving' | 'posting' | 'done'
+  const [detailDip, setDetailDip]       = useState(null); // dip record shown in details modal
 
   // Excel tab
   const [excelRows, setExcelRows]       = useState([]);
@@ -368,6 +495,13 @@ export default function DipEntry() {
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <div style={{ padding: '1.5rem', maxWidth: '1100px', margin: '0 auto' }}>
+      {detailDip && (
+        <DipDetailModal
+          dip={detailDip}
+          onClose={() => setDetailDip(null)}
+          onRetry={(id) => { handlePostFromHistory(id); setDetailDip(null); }}
+        />
+      )}
 
       {/* Page header */}
       <div style={{ marginBottom: '1.5rem' }}>
@@ -809,9 +943,16 @@ export default function DipEntry() {
                           {INPUT_METHODS[d.inputMethod] || d.inputMethod}
                         </td>
                         <td style={{ padding: '0.55rem 0.85rem' }}>
-                          <span style={S.badge(sc)} title={d.bapiResponse || ''}>
-                            {sc.label}
-                          </span>
+                          {sc.clickable ? (
+                            <button
+                              onClick={() => setDetailDip(d)}
+                              style={{ ...S.badge(sc), cursor: 'pointer', border: 'none', textDecoration: 'underline dotted' }}
+                              title="Click for details and next steps">
+                              {sc.label}
+                            </button>
+                          ) : (
+                            <span style={S.badge(sc)}>{sc.label}</span>
+                          )}
                         </td>
                         <td style={{ padding: '0.55rem 0.85rem' }}>
                           {(d.postingStatus === 'DRAFT' || d.postingStatus === 'FAILED') && (
