@@ -146,6 +146,57 @@ service ReconciliationService @(path: '/reconciliation')
     message          : String;
   };
 
+  // ─── Dip Reading Management ───────────────────────────────────────────────
+  entity DipReadings as projection on db.DipReading;
+
+  action saveDipReading(
+    tankId          : String(20),
+    tankName        : String(100),
+    measurementDate : Date,
+    measurementTime : String(6),
+    dipType         : String(1),
+    dipValue        : Decimal(15,3),
+    dipUnit         : String(3),
+    waterHeight     : Decimal(10,3),
+    waterHeightUnit : String(3),
+    temperature     : Decimal(7,3),
+    density         : Decimal(10,4),
+    dipEvent        : String(50),
+    inputMethod     : String(15),
+    notes           : String(1000)
+  ) returns {
+    id     : UUID;
+    status : String;
+  };
+
+  action saveDipToSAP(dipReadingId : UUID) returns {
+    success : Boolean;
+    message : String;
+  };
+
+  action batchSaveDipsToSAP(dipReadingIds : String(5000)) returns {
+    submitted : Integer;
+    failed    : Integer;
+    messages  : String(5000);
+  };
+
+  action parseDipFromPrompt(
+    text      : String(2000),
+    sessionId : String(100)
+  ) returns {
+    tankId          : String(20);
+    measurementDate : String;
+    measurementTime : String;
+    dipType         : String(1);
+    dipValue        : String;
+    dipUnit         : String(3);
+    waterHeight     : String;
+    temperature     : String;
+    density         : String;
+    dipEvent        : String(50);
+    confidence      : String;
+  };
+
   // ─── Probe standard SAP TSW OData services ───────────────────────────────
   action probeStandardTSWServices() returns String;
   action getNominationVesselDetails(nominationNumber : String(20), itemNumber : String(10)) returns {

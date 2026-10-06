@@ -8,6 +8,7 @@ import Configuration from './pages/Configuration.jsx';
 import TrendChart    from './pages/TrendChart.jsx';
 import AiChat        from './pages/AiChat.jsx';
 import NominationEta from './pages/NominationEta.jsx';
+import DipEntry      from './pages/DipEntry.jsx';
 import NotificationBell from './components/NotificationBell.jsx';
 import { AuthProvider, useAuth } from './AuthContext.jsx';
 
@@ -29,6 +30,7 @@ function AppShell() {
     { to: '/approvals',     label: '✅ Approval Queue',              show: user?.isSupervisor },
     { to: '/audit',         label: '📋 Audit Trail',                show: true },
     { to: '/trends',        label: '📈 Variance Trends',            show: true },
+    { to: '/dip-entry',     label: '💧 Dip Entry',                  show: true },
     { to: '/configuration', label: '⚙️  Configuration',            show: user?.isAdmin },
     { to: '/chat',          label: '💬 AI Assistant',               show: true },
     { to: '/nomination-eta', label: '🚢 TSW Nomination Agent',       show: true },
@@ -81,6 +83,7 @@ function AppShell() {
             } />
             <Route path="/chat"            element={<AiChat />} />
             <Route path="/nomination-eta" element={<NominationEta />} />
+            <Route path="/dip-entry"      element={<DipEntry />} />
             <Route path="*"               element={<Navigate to="/" replace />} />
           </Routes>
         </div>

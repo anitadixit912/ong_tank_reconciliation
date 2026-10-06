@@ -210,6 +210,74 @@ The following S/4HANA OData APIs are consumed by the n8n Reconciliation Agent. T
   - `GET /reconciliation/TankConfigurations` returns config (5 rows ✓)
 - [x] React dashboard Vite build completes successfully — 1883 modules, 0 errors (includes TrendChart R12 page)
 
+## Dip Reading Management Module (Enhancement)
+
+### Data Model Addition
+
+- [x] Added `DipReading` entity to `db/schema.cds`:
+  - `tankId` : String(20) — 20-char zero-padded SOCNR
+  - `tankName` : String(100)
+  - `measurementDate` : Date
+  - `measurementTime` : String(6) — HHMMSS format
+  - `dipType` : String(1) — I=Innage, U=Ullage
+  - `dipValue` : Decimal(15,3)
+  - `dipUnit` : String(3) — MM / CM / FT / BBL / M3
+  - `waterHeight` : Decimal(10,3)
+  - `waterHeightUnit` : String(3)
+  - `temperature` : Decimal(7,3) — degrees Celsius
+  - `density` : Decimal(10,4) — kg/m³
+  - `dipEvent` : String(50)
+  - `inputMethod` : String(15) — MANUAL / EXCEL / AI_PROMPT
+  - `postingStatus` : String(20) — DRAFT / SUBMITTED / POSTED / FAILED / PENDING_ABAP
+  - `bapiResponse` : String(2000)
+  - `notes` : String(1000)
+
+### CAP Service Actions
+
+- [x] Added to `srv/reconciliation-service.cds`:
+  - `DipReadings` entity projection
+  - `saveDipReading(...)` — saves new dip reading in CAP (status: DRAFT)
+  - `saveDipToSAP(dipReadingId)` — posts dip to SAP IS-Oil via OGS_S4 destination
+  - `batchSaveDipsToSAP(dipReadingIds)` — batch post for Excel upload
+  - `parseDipFromPrompt(text, sessionId)` — AI extraction via `aicore` destination
+
+- [x] Implemented handlers in `srv/reconciliation-service.js`:
+  - `saveDipToSAP` posts to `ZTANK_DIP_SRV_SRV/TankDipSet` with fields: `Socnr`, `Etmstm`, `TotalheightFltp`, `Meins`, `WaterheightFltp`
+  - CSRF token fetch → POST → status lifecycle (SUBMITTED → POSTED / FAILED / PENDING_ABAP)
+  - `parseDipFromPrompt` calls `aicore` destination — never returns fabricated values
+
+### React UI
+
+- [x] Added `💧 Dip Entry` page at `/dip-entry` (`app/react-ui/src/pages/DipEntry.jsx`):
+  - **Tab 1 — Manual Entry**: form with all BAPI fields, Save Draft + Save & Post buttons
+  - **Tab 2 — Excel Upload**: drag-drop .xlsx/.csv, flexible column mapping, batch post
+  - **Tab 3 — AI Prompt**: free text → `parseDipFromPrompt` → auto-fills manual form
+  - **History table**: last 50 dip readings with status badges and Post to SAP action
+
+### SAP IS-Oil Integration (ABAP)
+
+- [x] BAPI confirmed working: `BAPI_CREATE_DIPS_EXT` (function group `OIIC_DIP`)
+- [x] SEQ_NO resolved via table `OIISOCISL` (SOCNR → WERKS + LGORT + SEQNR)
+  - Tank 23 (SOCNR `00000000000000000023`): PLANT=1743, SLOC=17T1, SEQNR=`USMOB-17T2`
+  - Tank 5  (SOCNR `00000000000000000005`): PLANT=1743, SLOC=17T1, SEQNR=`USMOB-17T1`
+- [x] ABAP CREATE method implemented in `ZCL_ZTANK_DIP_SRV_DPC_EXT` → `/IWBEP/IF_MGW_APPL_SRV_RUNTIME~CREATE_ENTITY`
+  - Reads SOCNR from OData input
+  - Looks up WERKS + LGORT + SEQNR from `OIISOCISL`
+  - Calls `BAPI_CREATE_DIPS_EXT` → `BAPI_TRANSACTION_COMMIT`
+
+### New CF Asset: tank-dip-mcp-server
+
+- [x] Created `assets/tank-dip-mcp-server/` — Python MCP/SSE server on CF
+  - 8 MCP tools: `get_tank_configurations`, `get_tank_dips`, `list_dip_readings`, `create_dip_reading`, `post_dip_to_sap`, `batch_post_dips_to_sap`, `trigger_reconciliation_run`, `get_reason_codes`
+  - Mirrors `nomination-mcp-server` pattern
+  - Calls CAP backend via `httpx`
+
+### Agent Enhancement
+
+- [x] Updated `tank-reconciliation-agent` with 5 new LangChain tools for dip management
+- [x] Updated agent system prompt with autonomous 4-step dip-to-reconciliation pipeline
+- [x] Updated `SKILL.md` with dip parameters reference
+
 ## Requirements Coverage (R01–R13)
 
 - [x] **R01** Dual-Source Data Ingestion — n8n ATG + Fiori ingest nodes (Data Collector steps 2–5)

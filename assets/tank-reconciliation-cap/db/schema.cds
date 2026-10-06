@@ -114,6 +114,28 @@ entity TankConfiguration {
   terminalName       : String(100);
 }
 
+// ─── Dip Reading Management ────────────────────────────────────────────────────
+// Stores operator-entered dip readings before and after posting to SAP IS-Oil.
+// postingStatus lifecycle: DRAFT → SUBMITTED → POSTED | FAILED | PENDING_ABAP
+entity DipReading : cuid, managed {
+  tankId          : String(20)    @mandatory;
+  tankName        : String(100);
+  measurementDate : Date          @mandatory;
+  measurementTime : String(6);               // HHMMSS
+  dipType         : String(1)     @mandatory; // I=Innage U=Ullage
+  dipValue        : Decimal(15,3) @mandatory;
+  dipUnit         : String(3)     @mandatory; // MM CM L HL BBL M3
+  waterHeight     : Decimal(10,3);
+  waterHeightUnit : String(3);
+  temperature     : Decimal(7,3);
+  density         : Decimal(10,4);
+  dipEvent        : String(50);
+  inputMethod     : String(15)    default 'MANUAL'; // MANUAL EXCEL AI_PROMPT
+  postingStatus   : String(20)    default 'DRAFT';
+  bapiResponse    : String(2000);
+  notes           : String(1000);
+}
+
 // R12: Variance trend view — delta history per tank across completed runs
 view TankVarianceTrend as
   select from TankResult {

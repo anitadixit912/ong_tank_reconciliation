@@ -66,9 +66,23 @@ console.log('\n=== Step 1: Installing dependencies ===');
 run('npm install --cache /tmp/npm-cache --prefer-offline');
 
 // Step 2: CDS build
+//console.log('\n=== Step 2: CDS build --production ===');
+//run('node_modules/.bin/cds build --production');
+// Step 2: CDS build
 console.log('\n=== Step 2: CDS build --production ===');
 run('node_modules/.bin/cds build --production');
 
+// Ensure gen/db exists after CDS build (MBT validation requires it)
+const genDbDir = path.join(ROOT, 'gen', 'db');
+if (!fs.existsSync(genDbDir)) {
+  console.log('\n=== Step 2b: gen/db not found — creating it from db sources ===');
+  fs.mkdirSync(genDbDir, { recursive: true });
+  const dbSrcDir = path.join(ROOT, 'db');
+  if (fs.existsSync(dbSrcDir)) copyDir(dbSrcDir, genDbDir);
+  const dbPkg = { name: 'tank-reconciliation-cap-db', version: '1.0.0', scripts: { start: 'node node_modules/@sap/hdi-deploy/deploy.js' }, dependencies: { '@sap/hdi-deploy': '^5' } };
+  fs.writeFileSync(path.join(genDbDir, 'package.json'), JSON.stringify(dbPkg, null, 2));
+  console.log('    gen/db created with db sources');
+}
 if (COMPONENT_TYPE === 'srv') {
 
   // Step 3: React UI build

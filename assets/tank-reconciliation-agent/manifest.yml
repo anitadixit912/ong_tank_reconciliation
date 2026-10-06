@@ -17,5 +17,6 @@ applications:
     env:
       AICORE_DESTINATION_NAME: aicore
       S4HANA_DESTINATION_NAME: S4HANA_PUBLIC_CLOUD
+      CAP_BASE_URL: https://tank-reconciliation-cap-srv-patient-leopard-kw.cfapps.us10.hana.ondemand.com
       LOG_LEVEL: INFO
       AGENT_LLM_MODEL: gpt-4o

@@ -168,3 +168,34 @@ export async function fetchTerminals() {
 export async function chat(message, sessionId) {
   return action('chat', { message: message, sessionId: sessionId || '' });
 }
+
+// ── Dip Reading Management ─────────────────────────────────────────────────
+
+export async function fetchDipReadings(params) {
+  params = params || {};
+  var filters = [];
+  if (params.tankId)       filters.push("tankId eq '" + params.tankId + "'");
+  if (params.postingStatus) filters.push("postingStatus eq '" + params.postingStatus + "'");
+  var qp = odataParams(Object.assign(
+    { '$orderby': 'createdAt desc', '$top': params.top || 50 },
+    filters.length ? { '$filter': filters.join(' and ') } : {}
+  ));
+  var data = await odata('/reconciliation/DipReadings?' + qp);
+  return data.value || [];
+}
+
+export async function saveDipReading(fields) {
+  return action('saveDipReading', fields);
+}
+
+export async function saveDipToSAP(dipReadingId) {
+  return action('saveDipToSAP', { dipReadingId: dipReadingId });
+}
+
+export async function batchSaveDipsToSAP(ids) {
+  return action('batchSaveDipsToSAP', { dipReadingIds: ids.join(',') });
+}
+
+export async function parseDipFromPrompt(text, sessionId) {
+  return action('parseDipFromPrompt', { text: text, sessionId: sessionId || '' });
+}

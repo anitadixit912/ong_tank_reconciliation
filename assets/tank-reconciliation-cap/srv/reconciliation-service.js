@@ -1308,6 +1308,204 @@ module.exports = class ReconciliationService extends cds.ApplicationService {
       }
     });
 
+    // ── saveDipReading ───────────────────────────────────────────────────────
+    this.on('saveDipReading', async (req) => {
+      const {
+        tankId, tankName, measurementDate, measurementTime,
+        dipType, dipValue, dipUnit,
+        waterHeight, waterHeightUnit, temperature, density,
+        dipEvent, inputMethod, notes
+      } = req.data;
+
+      if (!tankId)          return req.reject(400, 'tankId is required');
+      if (!measurementDate) return req.reject(400, 'measurementDate is required');
+      if (!dipType)         return req.reject(400, 'dipType is required (I=Innage, U=Ullage)');
+      if (dipValue == null) return req.reject(400, 'dipValue is required');
+      if (!dipUnit)         return req.reject(400, 'dipUnit is required');
+
+      const id = cds.utils.uuid();
+      await INSERT.into('tank.reconciliation.DipReading').entries({
+        ID:              id,
+        tankId:          tankId.padStart(20, '0'),
+        tankName:        tankName || '',
+        measurementDate: measurementDate,
+        measurementTime: measurementTime || '',
+        dipType:         dipType,
+        dipValue:        dipValue,
+        dipUnit:         dipUnit,
+        waterHeight:     waterHeight || null,
+        waterHeightUnit: waterHeightUnit || '',
+        temperature:     temperature || null,
+        density:         density || null,
+        dipEvent:        dipEvent || '',
+        inputMethod:     inputMethod || 'MANUAL',
+        postingStatus:   'DRAFT',
+        bapiResponse:    '',
+        notes:           notes || '',
+        createdAt:       new Date().toISOString(),
+        modifiedAt:      new Date().toISOString()
+      });
+
+      cds.log('dip').info('saveDipReading: created id=' + id + ' tank=' + tankId);
+      return { id, status: 'DRAFT' };
+    });
+
+    // ── saveDipToSAP ─────────────────────────────────────────────────────────
+    this.on('saveDipToSAP', async (req) => {
+      const { dipReadingId } = req.data;
+      if (!dipReadingId) return req.reject(400, 'dipReadingId is required');
+
+      const dip = await SELECT.one.from('tank.reconciliation.DipReading').where({ ID: dipReadingId });
+      if (!dip) return req.reject(404, 'DipReading not found: ' + dipReadingId);
+
+      try {
+        const cfg     = await _resolveDestination(S4HANA_DESTINATION);
+        const baseUrl = (cfg.URL || cfg.url || '').replace(/\/$/, '');
+        if (!baseUrl) {
+          await UPDATE('tank.reconciliation.DipReading').set({ postingStatus: 'FAILED', bapiResponse: 'OGS_S4 destination URL not found' }).where({ ID: dipReadingId });
+          return { success: false, message: 'OGS_S4 destination URL not found' };
+        }
+
+        const authHeader = _basicAuthHeader(cfg);
+        const proxyOpts  = cfg._proxyHost ? { host: cfg._proxyHost, port: cfg._proxyPort, token: cfg._proxyToken, locationId: cfg._locationId } : null;
+
+        // CSRF token fetch
+        const tokenHeaders = { Accept: 'application/json', 'x-csrf-token': 'Fetch' };
+        if (authHeader) tokenHeaders['Authorization'] = authHeader;
+        const tokenRes    = await _httpGet(baseUrl + S4_DIP_PATH + '/TankDipSet', tokenHeaders, proxyOpts);
+        const csrfToken   = (tokenRes.headers && (tokenRes.headers['x-csrf-token'] || tokenRes.headers['X-CSRF-Token'])) || null;
+        const setCookie   = tokenRes.headers && tokenRes.headers['set-cookie'];
+        let sessionCookie = '';
+        if (setCookie) {
+          const cookies = Array.isArray(setCookie) ? setCookie : [setCookie];
+          sessionCookie = cookies.map(c => c.split(';')[0]).join('; ');
+        }
+
+        // Build dip timestamp YYYYMMDDHHMMSS
+        const dateStr = (dip.measurementDate || '').replace(/-/g, '');
+        const timeStr = (dip.measurementTime || '000000').padEnd(6, '0');
+        const dipTs   = dateStr + timeStr;
+
+        const body = JSON.stringify({
+          Socnr:           dip.tankId,
+          Etmstm:          dipTs,
+          TotalheightFltp: dip.dipValue,
+          Meins:           dip.dipUnit || 'MM',
+          WaterheightFltp: dip.waterHeight != null ? dip.waterHeight : 0
+        });
+
+        const postHeaders = { 'Content-Type': 'application/json', Accept: 'application/json' };
+        if (authHeader)    postHeaders['Authorization'] = authHeader;
+        if (csrfToken)     postHeaders['x-csrf-token']  = csrfToken;
+        if (sessionCookie) postHeaders['Cookie']         = sessionCookie;
+
+        await UPDATE('tank.reconciliation.DipReading').set({ postingStatus: 'SUBMITTED' }).where({ ID: dipReadingId });
+
+        const res = await _httpPost(baseUrl + S4_DIP_PATH + '/TankDipSet', body, postHeaders, proxyOpts);
+        cds.log('dip').info('saveDipToSAP POST status=' + res.status + ' body=' + res.body.slice(0, 300));
+
+        if (res.status === 201 || res.status === 200) {
+          await UPDATE('tank.reconciliation.DipReading').set({ postingStatus: 'POSTED', bapiResponse: res.body.slice(0, 2000) }).where({ ID: dipReadingId });
+          return { success: true, message: 'Dip reading posted to SAP IS-Oil successfully' };
+        } else if (res.status === 405) {
+          // CREATE not supported on this service — note it without losing data
+          const msg = 'ZTANK_DIP_SRV_SRV does not support CREATE (HTTP 405). Record saved in CAP. Contact OGS team to expose BAPI_TANK_DIP via a writable OData service.';
+          await UPDATE('tank.reconciliation.DipReading').set({ postingStatus: 'PENDING_ABAP', bapiResponse: msg }).where({ ID: dipReadingId });
+          return { success: false, message: msg };
+        } else {
+          let errMsg = 'HTTP ' + res.status;
+          try { errMsg = JSON.parse(res.body)?.error?.message?.value || errMsg; } catch (_) {}
+          await UPDATE('tank.reconciliation.DipReading').set({ postingStatus: 'FAILED', bapiResponse: errMsg }).where({ ID: dipReadingId });
+          return { success: false, message: errMsg };
+        }
+      } catch (err) {
+        const msg = 'saveDipToSAP failed: ' + err.message;
+        await UPDATE('tank.reconciliation.DipReading').set({ postingStatus: 'FAILED', bapiResponse: msg }).where({ ID: dipReadingId });
+        return { success: false, message: msg };
+      }
+    });
+
+    // ── batchSaveDipsToSAP ───────────────────────────────────────────────────
+    this.on('batchSaveDipsToSAP', async (req) => {
+      const { dipReadingIds } = req.data;
+      if (!dipReadingIds) return req.reject(400, 'dipReadingIds is required');
+
+      const ids = dipReadingIds.split(',').map(s => s.trim()).filter(Boolean);
+      let submitted = 0, failed = 0;
+      const messages = [];
+
+      for (const id of ids) {
+        try {
+          const result = await this.send('saveDipToSAP', { dipReadingId: id });
+          if (result && result.success) {
+            submitted++;
+          } else {
+            failed++;
+            messages.push(id.slice(0, 8) + ': ' + (result?.message || 'unknown error'));
+          }
+        } catch (e) {
+          failed++;
+          messages.push(id.slice(0, 8) + ': ' + e.message);
+        }
+      }
+
+      return { submitted, failed, messages: messages.join(' | ').slice(0, 5000) };
+    });
+
+    // ── parseDipFromPrompt ───────────────────────────────────────────────────
+    this.on('parseDipFromPrompt', async (req) => {
+      const { text } = req.data;
+      if (!text || text.trim().length < 5) return req.reject(400, 'text is required');
+
+      const systemPrompt = `You are a dip reading data extraction assistant for a hydrocarbon terminal.
+Extract dip reading parameters from the user's natural language input and return ONLY a JSON object.
+
+JSON fields (use null for fields not mentioned):
+- tankId: string — storage object number, zero-padded to 20 chars if numeric (e.g. "00000000000000000023")
+- measurementDate: string in YYYY-MM-DD format
+- measurementTime: string in HHMMSS format (24-hour, e.g. "143000")
+- dipType: "I" for innage/depth, "U" for ullage/empty space — default "I" if unclear
+- dipValue: numeric string (the measurement number only)
+- dipUnit: one of MM, CM, L, HL, BBL, M3 — infer from context
+- waterHeight: numeric string or null
+- temperature: numeric string in Celsius or null
+- density: numeric string in kg/m³ or null
+- dipEvent: short event description or null
+- confidence: "HIGH", "MEDIUM", or "LOW" based on how clearly the input specified the fields
+
+Return ONLY valid JSON. No explanation, no markdown, no code blocks.`;
+
+      let raw = '';
+      try {
+        raw = await _callAiCore(systemPrompt, text);
+      } catch (err) {
+        return req.reject(500, 'AI Core call failed: ' + err.message);
+      }
+
+      // Strip markdown code blocks if present
+      const cleaned = raw.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
+      let parsed = {};
+      try {
+        parsed = JSON.parse(cleaned);
+      } catch (_) {
+        return req.reject(422, 'AI returned non-JSON response: ' + raw.slice(0, 200));
+      }
+
+      return {
+        tankId:          parsed.tankId          || '',
+        measurementDate: parsed.measurementDate || '',
+        measurementTime: parsed.measurementTime || '',
+        dipType:         parsed.dipType         || '',
+        dipValue:        parsed.dipValue        != null ? String(parsed.dipValue) : '',
+        dipUnit:         parsed.dipUnit         || '',
+        waterHeight:     parsed.waterHeight     != null ? String(parsed.waterHeight) : '',
+        temperature:     parsed.temperature     != null ? String(parsed.temperature) : '',
+        density:         parsed.density         != null ? String(parsed.density)     : '',
+        dipEvent:        parsed.dipEvent        || '',
+        confidence:      parsed.confidence      || 'MEDIUM'
+      };
+    });
+
     return super.init();
   }
 };
