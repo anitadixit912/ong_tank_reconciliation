@@ -1,0 +1,972 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Hydrocarbon Tank Reconciliation — Architecture Walkthrough</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --panel: #1a1d27;
+    --border: #2e3249;
+    --accent: #4f8ef7;
+    --accent2: #34c98a;
+    --warn: #f5a623;
+    --danger: #e05555;
+    --purple: #a78bfa;
+    --text: #e2e8f0;
+    --muted: #8892a4;
+    --card-h: 540px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* ── Top bar ── */
+  header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 32px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+    position: sticky; top: 0; z-index: 100;
+  }
+  .logo { font-size: 13px; font-weight: 700; letter-spacing: 0.05em; color: var(--accent); }
+  .logo span { color: var(--muted); font-weight: 400; }
+  .controls { display: flex; gap: 10px; align-items: center; }
+  button {
+    background: var(--border); border: 1px solid #3a3f58; color: var(--text);
+    border-radius: 6px; padding: 6px 16px; cursor: pointer; font-size: 13px;
+    transition: background 0.15s, border-color 0.15s;
+  }
+  button:hover { background: #2e3455; border-color: var(--accent); }
+  button.primary {
+    background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600;
+  }
+  button.primary:hover { background: #3a7de0; }
+  button:disabled { opacity: 0.35; cursor: default; }
+  .auto-btn.playing { background: #e05555; border-color: #e05555; color: #fff; }
+
+  /* ── Progress dots ── */
+  .nav-dots {
+    display: flex; gap: 8px; align-items: center;
+  }
+  .dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--border); cursor: pointer;
+    transition: background 0.2s, transform 0.2s;
+  }
+  .dot.active { background: var(--accent); transform: scale(1.4); }
+  .dot.done   { background: var(--accent2); }
+
+  /* ── Slide container ── */
+  .stage {
+    max-width: 1400px; margin: 32px auto; padding: 0 24px;
+  }
+
+  .slide {
+    display: none;
+    animation: fadeSlideIn 0.5s ease forwards;
+  }
+  .slide.active { display: block; }
+
+  @keyframes fadeSlideIn {
+    from { opacity: 0; transform: translateY(18px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  /* ── Slide header ── */
+  .slide-header {
+    margin-bottom: 28px;
+  }
+  .slide-num {
+    font-size: 11px; font-weight: 700; letter-spacing: 0.12em;
+    color: var(--accent); text-transform: uppercase; margin-bottom: 6px;
+  }
+  .slide-title {
+    font-size: 26px; font-weight: 700; line-height: 1.2;
+  }
+  .slide-sub {
+    font-size: 14px; color: var(--muted); margin-top: 6px;
+  }
+
+  /* ── Flow card wrapper ── */
+  .flow-wrapper {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  /* ── Landscape layout: SVG left, description right ── */
+  .flow-body {
+    display: flex;
+    gap: 24px;
+    align-items: flex-start;
+  }
+
+  /* SVG scrolls vertically inside a fixed-height box */
+  .diagram {
+    flex: 1 1 0;
+    min-width: 0;
+    max-height: 72vh;
+    overflow-y: auto;
+    overflow-x: auto;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: #0d1020;
+    padding: 12px;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+  .diagram svg {
+    display: block;
+    /* let SVG use its natural width; height scales */
+    max-width: 100%;
+    height: auto;
+  }
+
+  /* Description panel — fixed width on the right */
+  .side-panel {
+    flex: 0 0 300px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  /* ── Step-reveal animation ── */
+  .step-node {
+    opacity: 0;
+    transform-origin: center;
+  }
+  .step-node.shown {
+    animation: popIn 0.4s cubic-bezier(0.34,1.56,0.64,1) forwards;
+  }
+  @keyframes popIn {
+    from { opacity: 0; transform: scale(0.7); }
+    to   { opacity: 1; transform: scale(1); }
+  }
+
+  .step-edge {
+    opacity: 0;
+    /* dasharray/dashoffset set dynamically via JS after getTotalLength() */
+  }
+  .step-edge.shown {
+    opacity: 1;
+    /* animation injected inline by JS so each edge uses its own length */
+  }
+  .step-edge.dimmed {
+    opacity: 0.18;
+    transition: opacity 0.4s ease;
+  }
+
+  /* ── Step description panel ── */
+  .step-desc {
+    margin-top: 20px;
+    background: #12151f;
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent);
+    border-radius: 8px;
+    padding: 14px 18px;
+    font-size: 13px;
+    line-height: 1.65;
+    min-height: 56px;
+    transition: opacity 0.3s;
+  }
+  .step-desc .tag {
+    display: inline-block;
+    background: var(--accent);
+    color: #fff;
+    font-size: 10px; font-weight: 700;
+    letter-spacing: 0.08em;
+    padding: 2px 7px; border-radius: 4px;
+    margin-right: 8px; vertical-align: middle;
+  }
+  .step-desc .tag.green  { background: var(--accent2); }
+  .step-desc .tag.orange { background: var(--warn); }
+  .step-desc .tag.red    { background: var(--danger); }
+  .step-desc .tag.purple { background: var(--purple); }
+
+  /* ── Step counter ── */
+  .step-counter {
+    font-size: 12px; color: var(--muted); text-align: right; margin-top: 10px;
+  }
+
+  /* ── Footer progress bar ── */
+  .progress-bar {
+    position: fixed; bottom: 0; left: 0; right: 0; height: 3px;
+    background: var(--border);
+  }
+  .progress-fill {
+    height: 100%; background: var(--accent);
+    transition: width 0.3s ease;
+  }
+
+  /* ── Slide transition ── */
+  @keyframes slideOutLeft {
+    to { opacity: 0; transform: translateX(-40px); }
+  }
+  .slide.leaving {
+    animation: slideOutLeft 0.3s ease forwards;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">🛢 Tank Reconciliation <span>/ Architecture Walkthrough</span></div>
+  <div class="nav-dots" id="navDots"></div>
+  <div class="controls">
+    <button id="prevBtn" onclick="navigate(-1)">← Prev</button>
+    <button id="prevStepBtn" onclick="prevStep()">↩ Step</button>
+    <button id="nextStepBtn" class="primary" onclick="nextStep()">Next Step →</button>
+    <button id="nextSlideBtn" onclick="navigate(1)">Next Chart →</button>
+    <button id="autoBtn" class="auto-btn" onclick="toggleAuto()">▶ Auto Play</button>
+  </div>
+</header>
+
+<div class="stage" id="stage"></div>
+
+<div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+
+<script>
+// ═══════════════════════════════════════════════════════════
+// DATA — each slide has steps; each step reveals nodes/edges
+// ═══════════════════════════════════════════════════════════
+
+const SLIDES = [
+
+// ── SLIDE 0: System Architecture ─────────────────────────────────────────────
+{
+  num: "01 / 04",
+  title: "Overall System Architecture",
+  sub: "How all components connect — from on-premise IS-Oil to BTP to external services",
+  steps: [
+    { desc: '<span class="tag">ON-PREM</span> SAP IS-Oil OGS/650 — the source of truth for all tank dip data. Physical readings live in the <b>OIB_TANKDIP</b> table.', show: ["g-onprem", "n-oib"] },
+    { desc: '<span class="tag">ON-PREM</span> Three custom OData services expose IS-Oil data: <b>ZTANK_DIP_SRV_SRV</b> (dips, reason codes, nominations), <b>ZTANK_PLANT_SRV_SRV</b> (plants), <b>ZTANK_POST_SRV_SRV</b> (goods movement posting).', show: ["n-z1","n-z2","n-z3","e-oib-z1"] },
+    { desc: '<span class="tag">ON-PREM</span> <b>Z_TANK_RECON_TRIGGER_RUN</b> — an ABAP function module that lets IS-Oil trigger reconciliation runs on BTP directly from ABAP, fetching an XSUAA token and calling the CAP endpoint.', show: ["n-abap"] },
+    { desc: '<span class="tag purple">CONNECTIVITY</span> The <b>BTP Cloud Connector (APAC_DEV10)</b> creates a secure reverse tunnel from BTP into the on-premise network — no firewall inbound rules needed.', show: ["n-cc","e-z1-cc","e-z2-cc","e-z3-cc"] },
+    { desc: '<span class="tag purple">CONNECTIVITY</span> Two BTP Destinations resolve credentials: <b>OGS_S4</b> for IS-Oil OData calls, <b>aicore</b> for SAP AI Core LLM access. CAP never exposes raw credentials to the browser.', show: ["n-dest-ogs","n-dest-aic","e-cc-ogs","e-cc-aic"] },
+    { desc: '<span class="tag green">BTP</span> The <b>CAP Backend (Node.js)</b> is the central hub — it stores all run history, variance records, approval decisions, audit logs, dip readings, and tank configurations in HANA Cloud.', show: ["g-btp","n-cap","n-hana","e-cap-hana"] },
+    { desc: '<span class="tag green">BTP</span> <b>App Router</b> handles XSUAA authentication and hosts the React UI. The <b>React Dashboard</b> gives all roles a single cockpit: Dashboard, Approval Queue, Audit Trail, Dip Entry, AI Chat, ETA Agent.', show: ["n-approuter","n-ui","e-approuter-ui","e-ui-cap"] },
+    { desc: '<span class="tag green">BTP</span> The <b>n8n Workflow</b> orchestrates the M1–M6 reconciliation pipeline — fetching dips, computing variances, routing approvals, posting goods movements, and distributing reports.', show: ["n-n8n","e-n8n-cap"] },
+    { desc: '<span class="tag green">BTP</span> Two <b>MCP Servers</b> (Model Context Protocol) expose operations as AI-callable tools. The <b>Tank Dip MCP Server</b> covers dip management; the <b>Nomination MCP Server</b> covers vessel nominations.', show: ["n-mcp-dip","n-mcp-nom","e-mcp-dip-cap","e-mcp-nom-cap"] },
+    { desc: '<span class="tag green">BTP</span> Two <b>LangGraph AI Agents</b>: the <b>Tank Reconciliation Agent</b> can autonomously create dip readings and trigger runs; the <b>Nomination ETA Agent</b> proposes risk-adjusted vessel ETAs.', show: ["n-ag-recon","n-ag-eta","e-ag-recon-mcp","e-ag-eta-mcp"] },
+    { desc: '<span class="tag orange">EXTERNAL</span> <b>SAP AI Core</b> (GPT-4o / Claude) powers the AI chat, natural language dip extraction, and the ETA agent reasoning. Accessed via the <b>aicore</b> BTP Destination — credentials never leave BTP.', show: ["g-ext","n-aicore","e-dest-aicore","e-cap-aicore"] },
+    { desc: '<span class="tag orange">EXTERNAL</span> <b>S/4HANA</b> receives posted Material Documents (movement types 551 shrinkage / 552 gain). The <b>MyShipTracking AIS</b> provides live vessel positions and ETAs via satellite transponders.', show: ["n-s4","n-mst","e-cap-s4","e-eta-mst"] },
+    { desc: '<span class="tag orange">EXTERNAL</span> <b>GDELT News API</b> scans 30 days of global headlines near a port to detect geopolitical risk (strikes, hurricanes, sanctions). <b>BTP ANS</b>, <b>MS Teams</b>, and <b>Email</b> handle alert distribution.', show: ["n-gdelt","n-ans","n-teams","e-eta-gdelt","e-n8n-ans","e-n8n-teams","e-abap-cap","e-ogs-cap"] },
+  ],
+  svg: buildArchSVG
+},
+
+// ── SLIDE 1: Reconciliation Pipeline ─────────────────────────────────────────
+{
+  num: "02 / 04",
+  title: "Reconciliation Pipeline — M1 to M6",
+  sub: "The 6-milestone automated pipeline from raw dip reading to posted material document",
+  steps: [
+    { desc: '<span class="tag">TRIGGER</span> Runs automatically at <b>6 AM daily</b> or on-demand from the React dashboard. Initiates the full 6-milestone pipeline.', show: ["n-trigger","e-trigger-m1"] },
+    { desc: '<span class="tag green">M1</span> <b>Data Ingestion</b> — reads live tank dip measurements directly from <b>OIB_TANKDIP</b> in IS-Oil via ZTANK_DIP_SRV_SRV. Each record contains both the physical quantity and the corresponding book stock. If any configured tank is missing a dip, the run halts immediately and raises a URGENT alert.', show: ["n-m1","n-chk","e-m1-chk"] },
+    { desc: '<span class="tag red">HALT</span> If any tank has no dip reading for the day, the pipeline stops here and fires an alert via BTP Alert Notification Service to the terminal supervisor.', show: ["n-halt","e-chk-halt"] },
+    { desc: '<span class="tag green">M2</span> <b>VCF Correction</b> — raw observed volumes are converted to net standard volumes using Volume Correction Factors (ASTM D1250 tables). Calls the SAP Hydrocarbon Quantity Conversion REST API. If unavailable, falls back to ASTM tables stored in CAP and flags this in the audit trail.', show: ["n-m2","e-chk-m2"] },
+    { desc: '<span class="tag green">M3</span> <b>Variance Calculation</b> — Delta = Physical Quantity − Book Stock. Delta% = Delta ÷ Book × 100. Each tank is classified against per-tank configurable thresholds stored in TankConfiguration.', show: ["n-m3","n-cls","e-m2-m3","e-m3-cls"] },
+    { desc: '<span class="tag green">OK</span> Variance ≤ 0.10% — within tolerance. Goods movement posts automatically without any human review.', show: ["n-ok","e-cls-ok"] },
+    { desc: '<span class="tag orange">FLAG</span> Variance 0.10%–0.25% — above tolerance but within secondary threshold. Posts automatically with a notification to the stock controller.', show: ["n-flag","e-cls-flag"] },
+    { desc: '<span class="tag red">URGENT</span> Variance > 0.25% — held in the CAP approval queue. No material document is ever posted without explicit supervisor sign-off.', show: ["n-urgent","e-cls-urgent"] },
+    { desc: '<span class="tag purple">M4</span> <b>Approval Gate</b> — the Terminal Supervisor reviews the tank detail in the React dashboard. They see the delta, the VCF-corrected volumes, and the historical context. A real-time alert fires to their Teams/email.', show: ["n-m4","n-dec","e-urgent-m4","e-m4-dec"] },
+    { desc: '<span class="tag green">APPROVE</span> Supervisor approves (optionally with a comment). The URGENT tank is released and proceeds to goods movement posting. The approval is recorded in the immutable audit trail with timestamp and actor.', show: ["n-appr","e-dec-appr"] },
+    { desc: '<span class="tag red">REJECT</span> Supervisor rejects with a mandatory comment. The run is flagged. No material document is posted. The audit trail records the reason for regulatory compliance.', show: ["n-rej","e-dec-rej","e-rej-end"] },
+    { desc: '<span class="tag green">M5</span> <b>Goods Movement Posting</b> — a Material Document is created in S/4HANA via API_MATERIAL_DOCUMENT_SRV. Movement type <b>551</b> = shrinkage (stock loss), <b>552</b> = gain. The document number is written back to the audit trail.', show: ["n-m5","e-ok-m5","e-flag-m5","e-appr-m5"] },
+    { desc: '<span class="tag green">M6</span> <b>Report & Alert Distribution</b> — a PDF report is generated per tank containing gross/net volumes, VCF factors, book stock, delta, and posting status. Distributed to Email, MS Teams webhook, and BTP Alert Notification Service. Audit trail closed.', show: ["n-m6","n-end","e-m5-m6","e-m6-end"] },
+  ],
+  svg: buildPipelineSVG
+},
+
+// ── SLIDE 2: Dip Entry Flow ───────────────────────────────────────────────────
+{
+  num: "03 / 04",
+  title: "Dip Reading Entry Flow",
+  sub: "Four methods to create a dip reading — from manual form entry to fully autonomous AI agent",
+  steps: [
+    { desc: '<span class="tag">START</span> A dip reading can be created by an <b>Operator</b> using the React dashboard or by an <b>AI Agent</b> using MCP tools — four distinct input methods, all converging to the same pipeline.', show: ["n-user"] },
+    { desc: '<span class="tag green">METHOD A</span> <b>Manual Entry</b> — operator selects the tank, fills in the form (dip type, value, unit, temperature, density, event), and clicks Save & Post to SAP. Simplest path, full operator control.', show: ["n-ma","e-user-ma"] },
+    { desc: '<span class="tag green">METHOD B</span> <b>Excel Upload</b> — operator drags a .xlsx file (BAPI_SILO.xlsx format or Tank Dip Posting Template_New.xlsx). System validates all rows, shows errors, then batch-posts via <code>batchSaveDipsToSAP</code>.', show: ["n-mb","e-user-mb"] },
+    { desc: '<span class="tag green">METHOD C</span> <b>AI Natural Language</b> — operator types a plain-text description, e.g. <i>"Tank 23, 1842mm innage, 38.5°C, post-discharge"</i>. Claude (via SAP AI Core) extracts all structured fields. Operator reviews the extracted data before confirming.', show: ["n-mc","e-user-mc"] },
+    { desc: '<span class="tag green">METHOD D</span> <b>AI Agent Autonomous</b> — supervisor instructs the Tank Reconciliation Agent. The agent calls MCP tools (<code>get_tank_configurations</code> → <code>create_dip_reading</code> → <code>post_dip_to_sap</code>) with no manual steps.', show: ["n-md","e-user-md"] },
+    { desc: '<span class="tag purple">SAVE</span> All methods call <b>CAP: saveDipReading</b> — creates a record in HANA with status <b>DRAFT</b>. No data is ever lost even if the downstream SAP call fails.', show: ["n-save","e-ma-save","e-mb-save","e-mc-save","e-md-save"] },
+    { desc: '<span class="tag purple">POST</span> <b>CAP: saveDipToSAP</b> — routes through the <b>OGS_S4</b> BTP Destination → Cloud Connector (APAC_DEV10) → SAP IS-Oil. Calls <b>ZTANK_DIP_SRV_SRV / TankDipSet CREATE</b> to write into <b>OIB_TANKDIP</b>.', show: ["n-post","n-status","e-save-post","e-post-status"] },
+    { desc: '<span class="tag green">POSTED</span> HTTP 2xx — dip reading successfully written to <b>OIB_TANKDIP</b> in IS-Oil. Record status updated to POSTED. The BAPI response code is stored in the dip record.', show: ["n-posted","e-status-posted"] },
+    { desc: '<span class="tag red">FAILED</span> HTTP 4xx/5xx — OGS returned an error. Status set to FAILED. The full <code>bapiResponse</code> message is stored so operators can diagnose the issue without checking SAP directly.', show: ["n-failed","e-status-failed"] },
+    { desc: '<span class="tag orange">PENDING_ABAP</span> HTTP 405 — the CREATE operation is not yet exposed on ZTANK_DIP_SRV_SRV. Record is stored safely in CAP with status PENDING_ABAP. Can be re-submitted once the ABAP team exposes the endpoint. No data loss.', show: ["n-pending","e-status-pending"] },
+    { desc: '<span class="tag green">RECONCILE</span> A successful post automatically triggers the <b>M1–M6 Reconciliation Pipeline</b> for that plant and date. The operator can see the variance result on the dashboard within seconds.', show: ["n-recon","e-posted-recon"] },
+  ],
+  svg: buildDipSVG
+},
+
+// ── SLIDE 3: ETA Agent ────────────────────────────────────────────────────────
+{
+  num: "04 / 04",
+  title: "TSW Nomination ETA Agent",
+  sub: "9-step LangGraph AI agent that proposes risk-adjusted vessel ETAs for hydrocarbon nominations",
+  steps: [
+    { desc: '<span class="tag">START</span> The supervisor opens the <b>TSW Nomination Agent</b> page in the React dashboard and types a nomination number. The LangGraph agent begins a 9-step data-gathering process before proposing any ETA.', show: ["n-chat","e-chat-s1"] },
+    { desc: '<span class="tag green">STEP 1</span> <b>Fetch Nomination</b> — calls CAP proxy → OGS_S4 Destination → ZTANK_DIP_SRV_SRV / NominationSet (via BAPI_TSW_NOM_GETLIST). Retrieves material, location, transport system, nominated quantity, and scheduled date.', show: ["n-s1","e-s1-s2"] },
+    { desc: '<span class="tag green">STEP 2</span> <b>Live Vessel Tracking</b> — queries <b>MyShipTracking AIS</b> at /port/estimate for all vessels heading to the destination port. If the nomination has a vessel name/IMO, also calls /vessel/search to get that specific vessel\'s live position and ETA.', show: ["n-s2","e-s2-s3"] },
+    { desc: '<span class="tag green">STEP 3</span> <b>Historical Patterns</b> — analyses all past nominations for the same material + location + transport system combination. Computes average lead times to establish a baseline ETA from historical data.', show: ["n-s3","e-s3-s4"] },
+    { desc: '<span class="tag green">STEP 4</span> <b>Carrier Performance</b> — scores the carrier\'s on-time record across all historical nominations. Rates from RELIABLE to HIGH_RISK. A HIGH_RISK carrier adds a buffer to the ETA.', show: ["n-s4","e-s4-s5"] },
+    { desc: '<span class="tag orange">STEP 5</span> <b>Geopolitical Risk</b> — scans the <b>GDELT News API</b> for 30 days of headlines near the destination port around the scheduled date. Detects strikes, hurricanes, sanctions, port closures, and accidents. Risk levels: None / Low / Medium / High → adds 0–6 day buffer.', show: ["n-s5","e-s5-s6"] },
+    { desc: '<span class="tag green">STEP 6</span> <b>Calculate ETA</b> — combines all inputs. Priority: <b>1) Live AIS</b> (most accurate) → <b>2) Historical average</b> → <b>3) Scheduled date only</b> (fallback). Applies geopolitical and carrier risk buffers. Assigns confidence: <b>High</b> (AIS + history) / <b>Medium</b> / <b>Low</b> (scheduled date only).', show: ["n-s6","e-s6-s7"] },
+    { desc: '<span class="tag purple">STEP 7</span> <b>Present ETA Report</b> — displays a full ETA card in the chat: proposed date, confidence score, reasoning narrative, and evidence from each of the 5 data sources. Asks the supervisor for approval.', show: ["n-s7","n-dec","e-s7-dec"] },
+    { desc: '<span class="tag green">APPROVED</span> Supervisor approves the ETA. The agent writes <b>5 values to S/4HANA</b>: the ETA itself plus 4 event dates — Loading, Berthing at destination, Discharge, and Departure. These update the nomination record in TSW.', show: ["n-appr","n-end","e-dec-appr","e-appr-end"] },
+    { desc: '<span class="tag red">REJECTED</span> Supervisor rejects with a reason. The agent records the reason, runs a deep historical reassessment, and presents <b>3 alternative ETAs</b> (conservative, likely, optimistic). The supervisor can approve one of the alternatives or reject again.', show: ["n-rej","e-dec-rej","e-rej-s7"] },
+  ],
+  svg: buildETASVG
+},
+
+];
+
+// ═══════════════════════════════════════════════════════════
+// SVG BUILDERS
+// Each returns an SVG string with data-id attributes on
+// every node and edge group. Initially opacity:0.
+// ═══════════════════════════════════════════════════════════
+
+function svg(w, h, content) {
+  return `<svg viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" xmlns="http://www.w3.org/2000/svg" style="max-width:100%;height:auto">${content}</svg>`;
+}
+
+// ── colour palette ────────────────────────────────────────
+const C = {
+  blue:   { fill:"#1e3a5f", stroke:"#4f8ef7", text:"#a8c8ff" },
+  green:  { fill:"#1a3d2b", stroke:"#34c98a", text:"#86efbe" },
+  orange: { fill:"#3d2a0f", stroke:"#f5a623", text:"#fcd48a" },
+  red:    { fill:"#3d1515", stroke:"#e05555", text:"#ffaaaa" },
+  purple: { fill:"#2a1f3d", stroke:"#a78bfa", text:"#d4bbff" },
+  grey:   { fill:"#1e2130", stroke:"#4a5068", text:"#8892a4" },
+};
+
+function node(id, x, y, w, h, label, color, shape="rect", extra="") {
+  const {fill,stroke,text} = C[color]||C.blue;
+  const lines = label.split('\n');
+  const lh = 16, pad = 10;
+  const th = lines.length * lh;
+  const ty = y + h/2 - th/2 + 11;
+
+  let bg;
+  if (shape === "diamond") {
+    const cx=x+w/2, cy=y+h/2;
+    bg = `<polygon points="${cx},${y} ${x+w},${cy} ${cx},${y+h} ${x},${cy}" fill="${fill}" stroke="${stroke}" stroke-width="1.5"/>`;
+  } else if (shape === "oval") {
+    bg = `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${h/2}" ry="${h/2}" fill="${fill}" stroke="${stroke}" stroke-width="1.5"/>`;
+  } else {
+    bg = `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="7" fill="${fill}" stroke="${stroke}" stroke-width="1.5"/>`;
+  }
+
+  const texts = lines.map((l,i) =>
+    `<text x="${x+w/2}" y="${ty + i*lh}" text-anchor="middle" font-family="Segoe UI,system-ui,sans-serif" font-size="11" fill="${text}" ${i===0&&lines.length>1?'font-weight="600"':''}>${l}</text>`
+  ).join('');
+
+  return `<g class="step-node" data-id="${id}" ${extra}>${bg}${texts}</g>`;
+}
+
+function edge(id, d, color="#4f8ef7", label="", lx=0, ly=0) {
+  const lbl = label ? `<text x="${lx}" y="${ly}" text-anchor="middle" font-family="Segoe UI,system-ui,sans-serif" font-size="10" fill="#8892a4">${label}</text>` : '';
+  return `<g class="step-edge" data-id="${id}">
+    <path d="${d}" fill="none" stroke="${color}" stroke-width="1.5" marker-end="url(#arr)"/>
+    ${lbl}
+  </g>`;
+}
+
+function defs() {
+  return `<defs>
+    <marker id="arr" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L8,3 z" fill="#4f8ef7"/>
+    </marker>
+    <marker id="arr-g" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L8,3 z" fill="#34c98a"/>
+    </marker>
+    <marker id="arr-r" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L8,3 z" fill="#e05555"/>
+    </marker>
+    <marker id="arr-o" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L8,3 z" fill="#f5a623"/>
+    </marker>
+    <marker id="arr-p" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L8,3 z" fill="#a78bfa"/>
+    </marker>
+  </defs>`;
+}
+
+// ── helpers ───────────────────────────────────────────────
+function line(x1,y1,x2,y2){return`M${x1},${y1} L${x2},${y2}`;}
+function down(x,y1,y2){return`M${x},${y1} L${x},${y2}`;}
+function right(x1,y,x2){return`M${x1},${y} L${x2},${y}`;}
+function elbow(x1,y1,x2,y2){return`M${x1},${y1} L${x1},${y2} L${x2},${y2}`;}
+function elbowR(x1,y1,x2,y2){return`M${x1},${y1} L${x2},${y1} L${x2},${y2}`;}
+
+// ── group background box ──────────────────────────────────
+function groupBg(id,x,y,w,h,label,color,textColor="#8892a4",extra="") {
+  return `<g class="step-node" data-id="${id}" ${extra}>
+    <rect x="${x}" y="${y}" width="${w}" height="${h}" rx="10" fill="${color}" stroke="${textColor}" stroke-width="1" stroke-dasharray="6 3" opacity="0.5"/>
+    <text x="${x+12}" y="${y+18}" font-family="Segoe UI,system-ui,sans-serif" font-size="11" font-weight="700" fill="${textColor}" letter-spacing="0.05em">${label}</text>
+  </g>`;
+}
+
+// ═══════════════════════════════════════════════════════════
+// SLIDE 0 — Architecture SVG
+// ═══════════════════════════════════════════════════════════
+function buildArchSVG() {
+  // Layout: 3 vertical lanes
+  // Lane 1 (On-Prem): x=10..340
+  // Lane 2 (BTP):     x=360..770
+  // Lane 3 (External):x=800..1060
+  // H=660: n-dest-aic bottom = 555+40=595, plus 65px margin
+  // BTP group height 600: n-ag-eta bottom = 525+52=577 + 23px margin
+  // Ext group height 600: n-teams bottom = 430+45=475, plus room
+  // On-prem group height 510: n-dest-aic bottom = 595
+  const W=1090, H=660;
+  let s = defs();
+
+  // Group backgrounds
+  s += groupBg("g-onprem",10,10,330,610,"ON-PREMISE — SAP IS-Oil OGS/650","#1a0f08","#b85450");
+  s += groupBg("g-btp",360,10,420,600,"SAP BTP — Cloud Foundry (us10)","#0a1628","#4f8ef7");
+  s += groupBg("g-ext",800,10,270,600,"External Services","#1a1800","#d6b656");
+
+  // On-prem nodes
+  s += node("n-oib", 30,40,180,52,"OIB_TANKDIP\n(physical dips + book stock)","red");
+  s += node("n-z1",  30,120,200,52,"ZTANK_DIP_SRV_SRV\nOData: TankDipSet / Nominations","red");
+  s += node("n-z2",  30,200,200,52,"ZTANK_PLANT_SRV_SRV\nOData: Plants / Terminals","red");
+  s += node("n-z3",  30,280,200,52,"ZTANK_POST_SRV_SRV\nOData: Goods Movement Posting","red");
+  s += node("n-abap",30,370,200,60,"Z_TANK_RECON_TRIGGER_RUN\nABAP FM — triggers BTP run","orange");
+
+  // Connectivity
+  s += node("n-cc",   30,490,200,42,"BTP Cloud Connector (APAC_DEV10)","purple","rect");
+  s += node("n-dest-ogs",30,555,140,40,"BTP Destination: OGS_S4","purple","rect");
+  s += node("n-dest-aic",185,555,140,40,"BTP Destination: aicore","purple","rect");
+
+  // BTP nodes
+  s += node("n-approuter",375,40,170,45,"App Router\nXSUAA Auth + UI Hosting","blue");
+  s += node("n-ui",       375,115,170,55,"React Dashboard\nDashboard / Approvals\nAudit / Dip Entry / Chat","blue");
+  s += node("n-cap",      565,80,195,90,"CAP Backend — Node.js\n──────────────────\nReconciliationRun / TankResult\nApprovalRecord / AuditLog","green","rect",'style="stroke-width:2"');
+  s += node("n-n8n",      375,205,170,52,"n8n Workflow\nOrchestration (M1→M6)","blue");
+  s += node("n-mcp-dip",  375,285,170,52,"Tank Dip MCP Server\nPython / MCP SDK","blue");
+  s += node("n-mcp-nom",  375,365,170,52,"Nomination MCP Server\nPython / MCP SDK","blue");
+  s += node("n-ag-recon", 375,445,170,52,"Tank Reconciliation Agent\nPython / LangGraph","blue");
+  s += node("n-ag-eta",   375,525,170,52,"Nomination ETA Agent\nPython / LangGraph","blue");
+  s += node("n-hana",     580,490,175,50,"SAP HANA Cloud\n(Persistent Store)","grey");
+
+  // External nodes
+  s += node("n-aicore",   815,40,240,52,"SAP AI Core\nGPT-4o / Claude (aicore dest.)","orange");
+  s += node("n-s4",       815,120,240,52,"S/4HANA\nAPI_MATERIAL_DOCUMENT_SRV","orange");
+  s += node("n-mst",      815,200,240,52,"MyShipTracking AIS\napi.myshiptracking.com/api/v2","orange");
+  s += node("n-gdelt",    815,280,240,52,"GDELT News API\nGeopolitical Risk Scanner","orange");
+  s += node("n-ans",      815,360,240,45,"BTP Alert Notification (ANS)","orange");
+  s += node("n-teams",    815,430,240,45,"MS Teams Webhook + Email","orange");
+
+  // Internal on-prem edges
+  s += edge("e-oib-z1",   down(120,92,120), "#e05555");
+  s += edge("e-z1-cc",    `M130,172 L130,490`, "#a78bfa");
+  s += edge("e-z2-cc",    `M140,252 L140,490`, "#a78bfa");
+  s += edge("e-z3-cc",    `M150,332 L150,490`, "#a78bfa");
+  s += edge("e-cc-ogs",   `M80,532 L80,555`, "#a78bfa");
+  s += edge("e-cc-aic",   `M200,532 L200,555`, "#a78bfa");
+
+  // BTP internal edges
+  s += edge("e-approuter-ui", down(460,85,115), "#4f8ef7");
+  s += edge("e-ui-cap",       `M545,140 L565,140`, "#4f8ef7");
+  s += edge("e-n8n-cap",      `M545,230 L565,145`, "#4f8ef7");
+  s += edge("e-mcp-dip-cap",  `M545,310 L565,150`, "#4f8ef7");
+  s += edge("e-mcp-nom-cap",  `M545,390 L565,155`, "#4f8ef7");
+  s += edge("e-ag-recon-mcp", `M460,445 L460,337`, "#4f8ef7");
+  s += edge("e-ag-eta-mcp",   `M460,525 L460,417`, "#4f8ef7");
+  s += edge("e-cap-hana",     down(657,170,490), "#34c98a");
+
+  // Cross-boundary edges
+  s += edge("e-ogs-cap",    `M170,575 L350,575 L350,155 L565,155`, "#a78bfa", "OData/REST", 340, 565);
+  s += edge("e-abap-cap",   `M230,400 L345,400 L345,130 L565,130`, "#f5a623", "HTTP trigger", 335, 390);
+  s += edge("e-dest-aicore",`M255,575 L335,575 L335,480 L800,480 L800,66 L815,66`, "#a78bfa");
+  s += edge("e-cap-aicore", `M760,100 L815,100`, "#34c98a", "AI Core", 790, 95);
+  s += edge("e-cap-s4",     `M760,140 L815,140`, "#34c98a", "Material Docs", 790, 135);
+  s += edge("e-eta-mst",    `M545,550 L790,550 L790,226 L815,226`, "#4f8ef7", "AIS", 795, 540);
+  s += edge("e-eta-gdelt",  `M545,555 L795,555 L795,306 L815,306`, "#4f8ef7", "news", 800, 545);
+  s += edge("e-n8n-ans",    `M545,242 L790,242 L790,382 L815,382`, "#4f8ef7", "alerts", 795, 232);
+  s += edge("e-n8n-teams",  `M545,248 L792,248 L792,452 L815,452`, "#4f8ef7", "reports", 797, 238);
+
+  return svg(W, H, s);
+}
+
+// ═══════════════════════════════════════════════════════════
+// SLIDE 1 — Pipeline SVG
+// ═══════════════════════════════════════════════════════════
+function buildPipelineSVG() {
+  // W=840 gives room for n-rej (x=620,w=170 → 790) + 50px margin
+  // H=1040 gives room for n-end (y=980,h=44 → 1024) + margin
+  const W=840, H=1040;
+  let s = defs();
+
+  // Main column x centre = 310, all vertical boxes 260 wide
+  const cx=310, lw=260, lx=cx-lw/2; // lx=180
+
+  s += node("n-trigger", lx,  15, lw, 44, "TRIGGER — 6AM schedule or manual", "green", "oval");
+  s += node("n-m1",      lx,  79, lw, 62, "M1 — Data Ingestion\nRead OIB_TANKDIP via ZTANK_DIP_SRV_SRV\nPhysical qty + book stock per tank","blue");
+  s += node("n-chk",     cx-70,171, 140,60, "All tanks\nhave dip?","orange","diamond");
+  // HALT pushed left so it fits: x=470, w=170 → right edge=640 < W=840
+  s += node("n-halt",    470,172, 170,55, "HALT — Raise\nURGENT alert (BTP ANS)\nMissing dip reading","red");
+  s += node("n-m2",      lx,265, lw, 62, "M2 — VCF Correction\nGross→Net volume (ASTM D1250)\nFallback flagged in audit","blue");
+  s += node("n-m3",      lx,350, lw, 55, "M3 — Variance Calculation\nDelta = Physical − Book Stock\nDelta% = Delta ÷ Book × 100","blue");
+  s += node("n-cls",     cx-65,427, 130,60, "Classify\nvariance","orange","diamond");
+
+  // Three branch boxes — spread so rightmost fits: x=465,w=170 → 635 < 840
+  s += node("n-ok",     20, 520, 160,55, "OK  ≤ 0.10%\nAuto-post immediately","green");
+  s += node("n-flag",   cx-80,520, 160,55, "FLAG  0.10%–0.25%\nAuto-post + notification","orange");
+  s += node("n-urgent", 465,520, 170,55, "URGENT  > 0.25%\nHold for supervisor","red");
+
+  s += node("n-m4",     468,600, 170,60, "M4 — Approval Gate\nCAP Approval Queue\nSupervisor reviews in dashboard","purple");
+  s += node("n-dec",    480,682, 140,60, "Supervisor\ndecision","orange","diamond");
+  // Approve: centred on main column
+  s += node("n-appr",   lx,762, lw,52, "Approved  (+ optional comment)","green");
+  // Reject: right side, x=465,w=170 → 635 < 840
+  s += node("n-rej",    465,755, 170,65, "Rejected\n(mandatory comment)\nRun flagged in audit","red");
+
+  s += node("n-m5",     lx,840, lw,60, "M5 — Goods Movement Posting\nMaterial Document → S/4HANA\n551=Shrinkage / 552=Gain","blue");
+  s += node("n-m6",     lx,920, lw,55, "M6 — Report & Alert Distribution\nPDF + Email + MS Teams + BTP ANS","blue");
+  s += node("n-end",    cx-90,980, 180,44, "Run complete — Audit trail closed","green","oval");
+
+  // Main spine
+  s += edge("e-trigger-m1", down(cx,59,79),   "#34c98a");
+  s += edge("e-m1-chk",     down(cx,141,171), "#4f8ef7");
+  s += edge("e-chk-halt",   `M380,201 L470,201`, "#e05555", "No", 422,193);
+  s += edge("e-chk-m2",     down(cx,231,265), "#4f8ef7", "Yes");
+  s += edge("e-m2-m3",      down(cx,327,350), "#4f8ef7");
+  s += edge("e-m3-cls",     down(cx,405,427), "#4f8ef7");
+
+  // Branch exits from classify diamond
+  s += edge("e-cls-ok",     `M245,457 L100,457 L100,520`, "#34c98a", "OK", 170,449);
+  s += edge("e-cls-flag",   `M310,487 L310,520`, "#f5a623", "FLAG", 326,505);
+  s += edge("e-cls-urgent", `M375,457 L550,457 L550,520`, "#e05555", "URGENT", 462,449);
+
+  // OK + FLAG feed into M5
+  s += edge("e-ok-m5",   `M100,575 L100,820 L180,840`,   "#34c98a");
+  s += edge("e-flag-m5", `M310,575 L310,810 L210,840`,   "#f5a623");
+
+  // URGENT path
+  s += edge("e-urgent-m4", down(550,575,600),            "#e05555");
+  s += edge("e-m4-dec",    down(553,660,682),            "#a78bfa");
+  // Approve: exits left of diamond → goes to appr box top-right
+  s += edge("e-dec-appr",  `M480,712 L420,712 L420,762`, "#34c98a", "Approve", 447,705);
+  // Reject: exits right of diamond → goes to rej box top
+  s += edge("e-dec-rej",   `M620,712 L635,712 L635,755`, "#e05555", "Reject",  630,705);
+  // Approve feeds M5
+  s += edge("e-appr-m5",   `M310,814 L310,840`,          "#34c98a");
+  // Reject drops to end (bypass M5/M6) via far-right lane
+  s += edge("e-rej-end",   `M635,820 L635,965 L490,965 L490,1002`, "#e05555");
+
+  s += edge("e-m5-m6",     down(cx,900,920),             "#4f8ef7");
+  s += edge("e-m6-end",    down(cx,975,980),             "#34c98a");
+
+  return svg(W,H,s);
+}
+
+// ═══════════════════════════════════════════════════════════
+// SLIDE 2 — Dip Entry SVG
+// ═══════════════════════════════════════════════════════════
+function buildDipSVG() {
+  const W=780, H=680;
+  let s = defs();
+
+  // User at top centre
+  s += node("n-user",  290, 10, 200, 44, "Operator / AI Agent", "green","oval");
+
+  // 4 method boxes
+  const my=90, mw=155, mh=70;
+  s += node("n-ma", 10,  my, mw, mh, "Method A\nManual Entry\nFill form → Post to SAP","blue");
+  s += node("n-mb", 180, my, mw, mh, "Method B\nExcel Upload\nDrag .xlsx → Batch post","blue");
+  s += node("n-mc", 350, my, mw, mh, "Method C\nAI Natural Language\nClaude extracts fields","green");
+  s += node("n-md", 520, my, mw, mh, "Method D\nAI Agent Autonomous\nMCP tools — no manual","green");
+
+  // User → methods
+  s += edge("e-user-ma", `M360,54 L87,90`,  "#34c98a");
+  s += edge("e-user-mb", `M370,54 L257,90`, "#34c98a");
+  s += edge("e-user-mc", `M390,54 L427,90`, "#34c98a");
+  s += edge("e-user-md", `M400,54 L597,90`, "#34c98a");
+
+  // Save box
+  s += node("n-save", 185, 210, 310, 52, "CAP: saveDipReading\nStatus: DRAFT — stored in HANA","purple");
+
+  // Methods → save (all converge)
+  const sy=210, scx=340;
+  s += edge("e-ma-save", `M87,160 L87,185 L240,210`,  "#a78bfa");
+  s += edge("e-mb-save", `M257,160 L257,185 L280,210`,"#a78bfa");
+  s += edge("e-mc-save", `M427,160 L427,185 L400,210`,"#a78bfa");
+  s += edge("e-md-save", `M597,160 L597,185 L440,210`,"#a78bfa");
+
+  // Post box
+  s += node("n-post",   145,295, 390,65, "CAP: saveDipToSAP\n→ OGS_S4 Destination → Cloud Connector\n→ ZTANK_DIP_SRV_SRV / TankDipSet CREATE","purple");
+  s += edge("e-save-post", down(scx,262,295), "#a78bfa");
+
+  // SAP response diamond
+  s += node("n-status", scx-65,390, 130,60, "SAP\nresponse?","orange","diamond");
+  s += edge("e-post-status", down(scx,360,390), "#a78bfa");
+
+  // 3 outcomes
+  s += node("n-posted",  20, 490, 165,65, "POSTED\nWritten to OIB_TANKDIP\nin SAP IS-Oil","green");
+  s += node("n-failed",  280,490, 155,65, "FAILED\nOGS error — inspect\nbapiResponse","red");
+  s += node("n-pending", 475,490, 185,65, "PENDING_ABAP\nCREATE not exposed yet\nSafe in CAP — re-submit","orange");
+
+  s += edge("e-status-posted",  `M275,420 L102,420 L102,490`, "#34c98a", "2xx", 180,415);
+  s += edge("e-status-failed",  `M340,450 L357,450 L357,490`, "#e05555", "4xx/5xx", 370,445);
+  s += edge("e-status-pending", `M405,420 L567,420 L567,490`, "#f5a623", "HTTP 405", 490,415);
+
+  // Posted → reconcile
+  s += node("n-recon", 185,595, 305,55, "Trigger Reconciliation Run\nM1 – M6 Pipeline","blue");
+  s += edge("e-posted-recon", `M102,555 L102,575 L247,595`, "#34c98a");
+
+  return svg(W,H,s);
+}
+
+// ═══════════════════════════════════════════════════════════
+// SLIDE 3 — ETA Agent SVG
+// Layout:  steps column centred at cx=390
+//          Approve branch goes LEFT  (min x = 390-70-20-220 = 80 > 0 ✓)
+//          Reject  branch goes RIGHT (max x = 390+70+20+220 = 700 < W=980 ✓)
+// ═══════════════════════════════════════════════════════════
+function buildETASVG() {
+  const cx=390, lw=300, lx=cx-lw/2; // lx=240
+  let s = defs();
+
+  const steps = [
+    ["n-chat","TRIGGER — Supervisor types nomination number",  "green","oval"],
+    ["n-s1",  "Step 1 — Fetch Nomination\nCAP→OGS_S4→NominationSet\nMaterial/Location/Transport/Date","blue","rect"],
+    ["n-s2",  "Step 2 — Live Vessel Tracking\nMyShipTracking AIS\n/port/estimate + /vessel/search","blue","rect"],
+    ["n-s3",  "Step 3 — Historical Patterns\nSame material + location + transport\nAverage lead time from prior records","blue","rect"],
+    ["n-s4",  "Step 4 — Carrier Performance\nScore on-time record\nRELIABLE → HIGH_RISK","blue","rect"],
+    ["n-s5",  "Step 5 — Geopolitical Risk (GDELT)\n30-day news scan near port\nAdds 0–6 day risk buffer","orange","rect"],
+    ["n-s6",  "Step 6 — Calculate ETA\nPriority: AIS > Historical > Scheduled\nConfidence: High / Medium / Low","green","rect"],
+    ["n-s7",  "Step 7 — Present ETA Report\nETA card + evidence + confidence\nAsk supervisor for approval","green","rect"],
+  ];
+
+  let y = 15;
+  const nodeH=65, gap=10;
+  const ids = [];
+  steps.forEach(([id,label,color,shape]) => {
+    const h = (shape==="oval") ? 46 : nodeH;
+    s += node(id, lx, y, lw, h, label, color, shape);
+    ids.push({id, y, h});
+    y += h + gap;
+  });
+
+  // Chain arrows down the spine
+  for (let i=0; i<ids.length-1; i++) {
+    const cur=ids[i], nxt=ids[i+1];
+    s += edge(
+      `e-${cur.id.replace('n-','')}-${ids[i+1].id.replace('n-','')}`,
+      down(cx, cur.y+cur.h, nxt.y), "#4f8ef7"
+    );
+  }
+
+  // Decision diamond — centred under the steps
+  const decY = y + 10;
+  const decCx = cx;
+  s += node("n-dec", decCx-70, decY, 140, 65, "Supervisor\ndecision","orange","diamond");
+  s += edge("e-s7-dec", down(decCx, ids[ids.length-1].y+ids[ids.length-1].h, decY), "#4f8ef7");
+
+  // ── Approve branch — goes LEFT then down ──────────────────
+  // Approve box: left of diamond, same y row+offset
+  const apprX  = 30;                   // left edge of approve box (x=30, safe)
+  const apprW  = 210;
+  const apprY  = decY + 100;
+  s += node("n-appr", apprX, apprY, apprW, 80,
+    "APPROVED\nWrite ETA + 4 event dates\nto S/4HANA:\nLoading / Berthing / Discharge / Departure","green");
+
+  // Path: exit left of diamond → go left → drop down to appr
+  const apprCx = apprX + apprW/2;
+  s += edge("e-dec-appr",
+    `M${decCx-70},${decY+32} L${apprCx},${decY+32} L${apprCx},${apprY}`,
+    "#34c98a", "Approve", apprCx-28, decY+26);
+
+  // End terminal below approve
+  const endY = apprY + 105;
+  s += node("n-end", apprX, endY, apprW, 46,
+    "ETA recorded in S/4HANA","green","oval");
+  s += edge("e-appr-end", down(apprCx, apprY+80, endY), "#34c98a");
+
+  // ── Reject branch — goes RIGHT then down ─────────────────
+  const rejX = decCx + 100;            // right of diamond
+  const rejW = 210;
+  const rejY = decY + 10;
+  s += node("n-rej", rejX, rejY, rejW, 85,
+    "REJECTED\nRecord reason\nDeep reassessment\nPresent 3 alternative ETAs","red");
+
+  // Path: exit right of diamond → enter left of rej
+  s += edge("e-dec-rej",
+    `M${decCx+70},${decY+32} L${rejX},${decY+32}`,
+    "#e05555", "Reject", decCx+88, decY+24);
+
+  // Reject loops back up to Step 7 — runs up the far-right rail
+  const s7 = ids[7];
+  const railX = rejX + rejW + 30;      // far-right rail x
+  s += edge("e-rej-s7",
+    `M${rejX+rejW/2},${rejY} L${rejX+rejW/2},${decY-10} L${railX},${decY-10} L${railX},${s7.y+s7.h/2} L${lx+lw},${s7.y+s7.h/2}`,
+    "#e05555", "re-present 3 alternatives", railX+8, decY-18, );
+
+  // Compute canvas height: max of (end terminal bottom, rej box bottom, loop rail)
+  const H = Math.max(endY + 46, rejY + 85, decY + 100) + 40;
+  // Width: rail goes to railX = rejX+rejW+30 = cx+100+210+30 = cx+340
+  const W = railX + 40;
+
+  return svg(W, H, s);
+}
+
+// ═══════════════════════════════════════════════════════════
+// RUNTIME
+// ═══════════════════════════════════════════════════════════
+
+let currentSlide = 0;
+let currentStep  = -1;   // -1 = nothing revealed yet
+let autoTimer    = null;
+
+function buildSlide(i) {
+  const s = SLIDES[i];
+  const svgHTML = s.svg();
+  return `
+    <div class="slide-header">
+      <div class="slide-num">${s.num}</div>
+      <div class="slide-title">${s.title}</div>
+      <div class="slide-sub">${s.sub}</div>
+    </div>
+    <div class="flow-wrapper">
+      <div class="flow-body">
+        <div class="diagram">${svgHTML}</div>
+        <div class="side-panel">
+          <div class="step-desc" id="stepDesc">Click <b>Next Step →</b> to begin the walkthrough.</div>
+          <div class="step-counter" id="stepCounter">Step 0 / ${s.steps.length}</div>
+        </div>
+      </div>
+    </div>`;
+}
+
+function renderSlide(i) {
+  const stage = document.getElementById('stage');
+
+  // Remove any existing active slide with leave animation
+  const existing = stage.querySelector('.slide.active');
+  if (existing) {
+    existing.classList.add('leaving');
+    setTimeout(() => existing.remove(), 300);
+  }
+
+  const div = document.createElement('div');
+  div.className = 'slide active';
+  div.innerHTML = buildSlide(i);
+  stage.appendChild(div);
+
+  currentSlide = i;
+  currentStep  = -1;
+  updateDots();
+  updateButtons();
+  updateProgress();
+}
+
+function navigate(dir) {
+  const next = currentSlide + dir;
+  if (next < 0 || next >= SLIDES.length) return;
+  renderSlide(next);
+}
+
+function revealElement(el, idx) {
+  if (!el) return;
+  const isEdge = el.classList.contains('step-edge');
+  if (isEdge) {
+    // Determine the path element (could be the element itself or a child <path>/<line>)
+    const pathEl = (el.tagName === 'path' || el.tagName === 'line' || el.tagName === 'polyline')
+      ? el
+      : el.querySelector('path, line, polyline');
+    const len = pathEl ? Math.ceil(pathEl.getTotalLength()) + 10 : 600;
+    // Set dash properties before making visible
+    pathEl && (pathEl.style.strokeDasharray = len);
+    pathEl && (pathEl.style.strokeDashoffset = len);
+    el.style.opacity = '1';
+    // Inject keyframe animation inline
+    const animName = `drawLine_${len}`;
+    if (!document.getElementById(animName)) {
+      const style = document.createElement('style');
+      style.id = animName;
+      style.textContent = `@keyframes ${animName} { from { stroke-dashoffset: ${len}; } to { stroke-dashoffset: 0; } }`;
+      document.head.appendChild(style);
+    }
+    if (pathEl) {
+      pathEl.style.animation = 'none';
+      void pathEl.offsetWidth; // force reflow
+      pathEl.style.animationDelay = `${idx * 80}ms`;
+      pathEl.style.animation = `${animName} 0.55s ease forwards`;
+    }
+    el.classList.add('shown');
+  } else {
+    el.style.animationDelay = `${idx * 80}ms`;
+    el.classList.add('shown');
+  }
+}
+
+function nextStep() {
+  const s = SLIDES[currentSlide];
+  if (currentStep >= s.steps.length - 1) {
+    if (currentSlide < SLIDES.length - 1) navigate(1);
+    return;
+  }
+
+  // Dim all currently shown edges (focus shifts to the new step)
+  document.querySelectorAll('.step-edge.shown').forEach(el => el.classList.add('dimmed'));
+
+  currentStep++;
+  const step = s.steps[currentStep];
+
+  // Reveal new elements
+  step.show.forEach((id, idx) => {
+    setTimeout(() => {
+      const el = document.querySelector(`[data-id="${id}"]`);
+      if (el) revealElement(el, idx);
+    }, idx * 80);
+  });
+
+  // Update description
+  setTimeout(() => {
+    const desc = document.getElementById('stepDesc');
+    if (desc) {
+      desc.style.opacity = 0;
+      setTimeout(() => {
+        desc.innerHTML = step.desc;
+        desc.style.opacity = 1;
+      }, 150);
+    }
+  }, 100);
+
+  const counter = document.getElementById('stepCounter');
+  if (counter) counter.textContent = `Step ${currentStep + 1} / ${s.steps.length}`;
+
+  updateButtons();
+  updateProgress();
+}
+
+function prevStep() {
+  if (currentStep <= 0) return;
+  currentStep--;
+  replayUpToCurrentStep();
+}
+
+function replayUpToCurrentStep() {
+  // Re-render the slide SVG from scratch (wipes all shown/dimmed state)
+  const stage = document.getElementById('stage');
+  const div = stage.querySelector('.slide.active');
+  if (div) div.innerHTML = buildSlide(currentSlide);
+
+  const s = SLIDES[currentSlide];
+
+  // Replay steps 0..currentStep with zero animation delay (instant)
+  for (let i = 0; i <= currentStep; i++) {
+    const step = s.steps[i];
+    const isLast = (i === currentStep);
+    step.show.forEach((id) => {
+      const el = document.querySelector(`[data-id="${id}"]`);
+      if (!el) return;
+      if (el.classList.contains('step-edge')) {
+        const pathEl = (el.tagName === 'path' || el.tagName === 'line' || el.tagName === 'polyline')
+          ? el : el.querySelector('path, line, polyline');
+        const len = pathEl ? Math.ceil(pathEl.getTotalLength()) + 10 : 600;
+        if (pathEl) {
+          pathEl.style.strokeDasharray = len;
+          pathEl.style.strokeDashoffset = 0;
+          pathEl.style.animation = 'none';
+        }
+        el.style.opacity = isLast ? '1' : '0.18';
+        el.classList.add('shown');
+        if (!isLast) el.classList.add('dimmed');
+      } else {
+        el.style.animationDelay = '0ms';
+        el.style.animation = 'none';
+        el.style.opacity = '1';
+        el.style.transform = 'scale(1)';
+        el.classList.add('shown');
+      }
+    });
+  }
+
+  // Update description to current step
+  const step = s.steps[currentStep];
+  const desc = document.getElementById('stepDesc');
+  if (desc) { desc.innerHTML = step.desc; desc.style.opacity = '1'; }
+  const counter = document.getElementById('stepCounter');
+  if (counter) counter.textContent = `Step ${currentStep + 1} / ${s.steps.length}`;
+
+  updateButtons();
+  updateProgress();
+}
+
+function updateButtons() {
+  const s = SLIDES[currentSlide];
+  document.getElementById('prevBtn').disabled = currentSlide === 0;
+  document.getElementById('prevStepBtn').disabled = currentStep <= 0;
+  document.getElementById('nextSlideBtn').disabled = currentSlide === SLIDES.length - 1;
+  const nb = document.getElementById('nextStepBtn');
+  if (currentStep >= s.steps.length - 1) {
+    nb.textContent = currentSlide < SLIDES.length - 1 ? 'Next Chart →' : 'Done ✓';
+  } else {
+    nb.textContent = 'Next Step →';
+  }
+}
+
+function updateDots() {
+  const container = document.getElementById('navDots');
+  container.innerHTML = '';
+  SLIDES.forEach((_, i) => {
+    const d = document.createElement('div');
+    d.className = 'dot' + (i === currentSlide ? ' active' : i < currentSlide ? ' done' : '');
+    d.title = SLIDES[i].title;
+    d.onclick = () => renderSlide(i);
+    container.appendChild(d);
+  });
+}
+
+function updateProgress() {
+  const total = SLIDES.reduce((sum, s) => sum + s.steps.length, 0);
+  const done  = SLIDES.slice(0, currentSlide).reduce((sum, s) => sum + s.steps.length, 0)
+                + Math.max(0, currentStep + 1);
+  document.getElementById('progressFill').style.width = `${(done / total) * 100}%`;
+}
+
+function toggleAuto() {
+  const btn = document.getElementById('autoBtn');
+  if (autoTimer) {
+    clearInterval(autoTimer);
+    autoTimer = null;
+    btn.textContent = '▶ Auto Play';
+    btn.classList.remove('playing');
+  } else {
+    btn.textContent = '⏸ Pause';
+    btn.classList.add('playing');
+    autoTimer = setInterval(() => {
+      const s = SLIDES[currentSlide];
+      if (currentStep >= s.steps.length - 1) {
+        if (currentSlide < SLIDES.length - 1) {
+          renderSlide(currentSlide + 1);
+        } else {
+          toggleAuto(); // stop at end
+        }
+      } else {
+        nextStep();
+      }
+    }, 1800);
+  }
+}
+
+// ── Init ──────────────────────────────────────────────────
+renderSlide(0);
+</script>
+</body>
+</html>
